@@ -156,10 +156,10 @@ fun MainDashboardScreen(
                 list.add(ExamTickerItem(if (isTr) "KPSS Lisans 2027" else "KPSS 2027 Exam", kpssDays, "KPSS"))
             }
             else -> {
-                list.add(ExamTickerItem("YKS (TYT) 2027", tytDays, "YKS"))
-                list.add(ExamTickerItem("YKS (AYT) 2027", aytDays, "YKS"))
+                list.add(ExamTickerItem("TYT 2027", tytDays, "YKS"))
+                list.add(ExamTickerItem("AYT 2027", aytDays, "YKS"))
                 if (userTrack.trim().equals("Dil", ignoreCase = true)) {
-                    list.add(ExamTickerItem("YKS (YDT) 2027", aytDays, "YKS"))
+                    list.add(ExamTickerItem("YDT 2027", aytDays, "YKS"))
                 }
                 list.add(ExamTickerItem("MSÜ 2027", msuDays, "MSÜ"))
             }
@@ -174,9 +174,18 @@ fun MainDashboardScreen(
         list
     }
 
-    var selectedExamIndex by remember { mutableIntStateOf(0) }
-    val currentExamIndex = if (examList.isNotEmpty()) selectedExamIndex.coerceIn(0, examList.lastIndex) else 0
-    val currentExam = examList.getOrElse(currentExamIndex) { ExamTickerItem("YKS (TYT) 2027", tytDays, "YKS") }
+    val savedExamIndex by viewModel.selectedDashboardExamIndex.collectAsState()
+    val savedExamTitle by viewModel.selectedDashboardExamTitle.collectAsState()
+    val currentExamIndex = remember(examList, savedExamIndex, savedExamTitle) {
+        if (examList.isEmpty()) 0
+        else {
+            val titleMatch = if (savedExamTitle.isNotBlank()) {
+                examList.indexOfFirst { it.title == savedExamTitle }
+            } else -1
+            if (titleMatch >= 0) titleMatch else savedExamIndex.coerceIn(0, examList.lastIndex)
+        }
+    }
+    val currentExam = examList.getOrElse(currentExamIndex) { ExamTickerItem("TYT 2027", tytDays, "YKS") }
 
     Box(
         modifier = Modifier
@@ -319,7 +328,10 @@ fun MainDashboardScreen(
                     ) {
                         IconButton(
                             onClick = {
-                                selectedExamIndex = if (currentExamIndex > 0) currentExamIndex - 1 else examList.lastIndex
+                                if (examList.isNotEmpty()) {
+                                    val nextIdx = if (currentExamIndex > 0) currentExamIndex - 1 else examList.lastIndex
+                                    viewModel.selectDashboardExam(nextIdx, examList[nextIdx].title)
+                                }
                             },
                             modifier = Modifier
                                 .size(48.dp)
@@ -395,7 +407,10 @@ fun MainDashboardScreen(
 
                         IconButton(
                             onClick = {
-                                selectedExamIndex = if (currentExamIndex < examList.lastIndex) currentExamIndex + 1 else 0
+                                if (examList.isNotEmpty()) {
+                                    val nextIdx = if (currentExamIndex < examList.lastIndex) currentExamIndex + 1 else 0
+                                    viewModel.selectDashboardExam(nextIdx, examList[nextIdx].title)
+                                }
                             },
                             modifier = Modifier
                                 .size(48.dp)

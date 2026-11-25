@@ -20,7 +20,9 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.printToString
+import androidx.compose.ui.test.swipeRight
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
@@ -75,15 +77,30 @@ class AppUiTest {
     private fun completeOnboarding(name: String = "Ali", track: String = "Sayısal", target: String = "YKS") {
         composeTestRule.runOnUiThread {
             val vm = ViewModelProvider(composeTestRule.activity)[StudyViewModel::class.java]
+            vm.clearFocusLock()
+            vm.selectMainTab(0)
+            vm.selectTimerHubTab(0)
             vm.saveUserProfile(name, track, target, role = UserPreferences.ROLE_STUDENT)
             vm.syncSystemLanguage()
         }
         composeTestRule.waitForIdle()
+        if (composeTestRule.onAllNodes(hasTestTag("nav_tab_main")).fetchSemanticsNodes().isNotEmpty()) {
+            composeTestRule.onNodeWithTag("nav_tab_main").performClick()
+            composeTestRule.waitForIdle()
+        }
     }
 
     private fun scrollVerticalListToTag(tag: String) {
-        composeTestRule.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange))
-            .performScrollToNode(hasTestTag(tag))
+        val scrollMatcher = SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange)
+        val nodes = composeTestRule.onAllNodes(scrollMatcher).fetchSemanticsNodes()
+        if (nodes.size <= 1) {
+            composeTestRule.onNode(scrollMatcher).performScrollToNode(hasTestTag(tag))
+        } else {
+            val targetIdx = nodes.indexOfFirst {
+                it.boundsInRoot.left in -10f..40f && it.boundsInRoot.width > 100f
+            }.coerceAtLeast(0)
+            composeTestRule.onAllNodes(scrollMatcher)[targetIdx].performScrollToNode(hasTestTag(tag))
+        }
         composeTestRule.waitForIdle()
     }
 
@@ -591,22 +608,21 @@ class AppUiTest {
 
     @Test
     @Config(sdk = [36], qualifiers = "tr-rTR-w412dp-h915dp")
-    fun `dark focus mode is renamed to Koyu Odak Modu and shows clean centered time above nav bar`() {
+    fun `manual corner lock enters fullscreen dark focus mode after 5s with zero buttons and settings removes amoled toggle`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         ActiveTimerManager.resetPomodoro(context)
         completeOnboarding("Elif", "Sayısal", "YKS")
-        composeTestRule.runOnUiThread {
-            ViewModelProvider(composeTestRule.activity)[StudyViewModel::class.java]
-                .setAmoledModeEnabled(true)
-        }
+
+        // Verify AMOLED focus setting is removed from Settings
+        composeTestRule.onNodeWithTag("dashboard_more_menu_btn").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Ayarlar").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(0, composeTestRule.onAllNodes(hasTestTag("settings_amoled")).fetchSemanticsNodes().size)
+        composeTestRule.activity.onBackPressedDispatcher.onBackPressed()
         composeTestRule.waitForIdle()
 
-        val title = TranslationHelper.getTranslation("amoled_title", "TR")
-        val desc = TranslationHelper.getTranslation("amoled_desc", "TR")
-        assertTrue(title.contains("Koyu Odak Modu"))
-        assertTrue(desc.contains("sadece kalan süreyi gösterir"))
-        assertTrue(desc.contains("AMOLED ekranlar için önerilir"))
-
+        // Start Pomodoro and lock via corner lock icon button
         composeTestRule.onNodeWithTag("nav_tab_timer_hub").performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("timer_hub_tab_1").performClick()
@@ -614,26 +630,58 @@ class AppUiTest {
         composeTestRule.onNodeWithTag("pomo_start_btn").performClick()
         composeTestRule.waitForIdle()
 
-        // Advance both Compose test clock and Robolectric main looper past 15s idle threshold
-        composeTestRule.mainClock.advanceTimeBy(16_000L)
-        org.robolectric.shadows.ShadowLooper.idleMainLooper(16, java.util.concurrent.TimeUnit.SECONDS)
+        composeTestRule.onNodeWithTag("pomo_focus_lock_btn").assertIsDisplayed()
+        val lockBounds = composeTestRule.onNodeWithTag("pomo_focus_lock_btn").fetchSemanticsNode().boundsInRoot
+        val pauseBounds = composeTestRule.onNodeWithTag("pomo_pause_btn").fetchSemanticsNode().boundsInRoot
+        assertFalse(lockBounds.overlaps(pauseBounds))
+
+        composeTestRule.onNodeWithTag("pomo_focus_lock_btn").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("pomo_focus_lock_armed").assertIsDisplayed()
+
+        // Advance both Compose test clock and Robolectric main looper past 5s threshold
+        composeTestRule.mainClock.advanceTimeBy(5_500L)
+        org.robolectric.shadows.ShadowLooper.idleMainLooper(6, java.util.concurrent.TimeUnit.SECONDS)
         composeTestRule.waitForIdle()
 
         composeTestRule.onNodeWithTag("dark_focus_overlay").assertIsDisplayed()
         composeTestRule.onNodeWithTag("dark_focus_time_text").assertIsDisplayed()
         assertEquals(0, composeTestRule.onAllNodesWithText("Ana Sayfa").fetchSemanticsNodes().size)
-        assertEquals(0, composeTestRule.onAllNodesWithText("Koyu Odak Modu").fetchSemanticsNodes().size)
+        assertEquals(0, composeTestRule.onAllNodesWithText("Acil Durum (Duraklat)").fetchSemanticsNodes().size)
+        assertEquals(0, composeTestRule.onAllNodes(hasTestTag("dark_focus_unlock_btn")).fetchSemanticsNodes().size)
+        assertEquals(0, composeTestRule.onAllNodes(hasTestTag("dark_focus_unlock_slider")).fetchSemanticsNodes().size)
 
-        // Tap overlay to wake display back up
+        // First tap reveals the Lock button without exiting Focus Mode
         composeTestRule.onNodeWithTag("dark_focus_overlay").performClick()
         composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("dark_focus_overlay").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("dark_focus_unlock_btn").assertIsDisplayed()
+
+        // Tap Lock button to reveal slide-to-unlock bar
+        composeTestRule.onNodeWithTag("dark_focus_unlock_btn").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("dark_focus_unlock_slider").assertIsDisplayed()
+
+        // Slide across the thumb to unlock while keeping Pomodoro running
+        composeTestRule.onNodeWithTag("dark_focus_unlock_slider").performTouchInput {
+            swipeRight(startX = width * 0.08f, endX = width * 0.96f)
+        }
+        composeTestRule.waitForIdle()
+        assertEquals(0, composeTestRule.onAllNodes(hasTestTag("dark_focus_overlay")).fetchSemanticsNodes().size)
         composeTestRule.onNodeWithTag("nav_tab_main").assertIsDisplayed()
+        val vm = ViewModelProvider(composeTestRule.activity)[StudyViewModel::class.java]
+        assertEquals(null, vm.focusLockedTarget.value)
+        assertEquals(PomodoroState.WORKING, vm.pomodoroState.value)
+
+        // Direct Pause shows Devam and Sonlandir without Acil Durum prompt
+        composeTestRule.onNodeWithTag("pomo_pause_btn").assertTextEquals("Duraklat")
+        composeTestRule.onNodeWithTag("pomo_pause_btn").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(0, composeTestRule.onAllNodesWithText("Acil Durum", substring = true, ignoreCase = true).fetchSemanticsNodes().size)
+        composeTestRule.onNodeWithTag("pomo_resume_btn").assertTextEquals("Devam")
+        composeTestRule.onNodeWithTag("pomo_end_btn").assertTextEquals("Sonlandır")
 
         ActiveTimerManager.resetPomodoro(context)
-        composeTestRule.runOnUiThread {
-            ViewModelProvider(composeTestRule.activity)[StudyViewModel::class.java]
-                .setAmoledModeEnabled(false)
-        }
     }
 
     @Test
@@ -822,16 +870,31 @@ class AppUiTest {
         composeTestRule.waitForIdle()
 
         scrollVerticalListToTag("settings_about_card")
-        composeTestRule.onNodeWithText("Sürüm 0.0.5").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Sürüm 0.0.6").assertIsDisplayed()
         assertEquals(0, composeTestRule.onAllNodesWithText("Tüm Verileri Sil", ignoreCase = true).fetchSemanticsNodes().size)
         assertEquals(0, composeTestRule.onAllNodes(hasTestTag("settings_clear_data")).fetchSemanticsNodes().size)
 
         scrollVerticalListToTag("developer_apps_btn")
-        composeTestRule.onNodeWithTag("bug_report_btn").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("about_version_text").assertIsDisplayed()
         composeTestRule.onNodeWithTag("github_releases_btn").assertIsDisplayed()
         composeTestRule.onNodeWithTag("developer_apps_btn").assertIsDisplayed()
         composeTestRule.onNodeWithTag("developer_apps_btn").assertTextEquals("Geliştirici")
         composeTestRule.onNodeWithText("Ali Erdem ŞENOL", substring = true).assertIsDisplayed()
+
+        // Bug Report button is hidden until version text is tapped 7 times
+        assertEquals(0, composeTestRule.onAllNodes(hasTestTag("bug_report_btn")).fetchSemanticsNodes().size)
+        repeat(6) {
+            composeTestRule.onNodeWithTag("about_version_text").performClick()
+            composeTestRule.waitForIdle()
+        }
+        assertEquals(0, composeTestRule.onAllNodes(hasTestTag("bug_report_btn")).fetchSemanticsNodes().size)
+
+        // 7th tap unlocks developer options and reveals Bug Report in exact position
+        composeTestRule.onNodeWithTag("about_version_text").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals("Geliştirici seçenekleri açıldı", org.robolectric.shadows.ShadowToast.getTextOfLatestToast())
+        scrollVerticalListToTag("developer_apps_btn")
+        composeTestRule.onNodeWithTag("bug_report_btn").assertIsDisplayed()
 
         val verY = composeTestRule.onNodeWithTag("about_version_text").fetchSemanticsNode().boundsInRoot.top
         val bugY = composeTestRule.onNodeWithTag("bug_report_btn").fetchSemanticsNode().boundsInRoot.top
@@ -1289,7 +1352,7 @@ class AppUiTest {
         composeTestRule.onNodeWithTag("timer_hub_tab_0").assertIsDisplayed()
         composeTestRule.onNodeWithText("Geri Sayım").assertIsDisplayed()
 
-        // Switch to Pomodoro tab and verify Karışık stage pill works
+        // Switch to Pomodoro tab and verify Karışık stage pill works and hides subject list
         composeTestRule.onNodeWithTag("timer_hub_tab_1").performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("pomo_stage_KARISIK").assertIsDisplayed()
@@ -1297,17 +1360,23 @@ class AppUiTest {
         composeTestRule.waitForIdle()
         val vm = ViewModelProvider(composeTestRule.activity)[StudyViewModel::class.java]
         assertEquals("KARISIK", vm.pomoExamStage.value)
+        assertEquals("Karışık", vm.selectedSubject.value)
+        assertEquals(0, composeTestRule.onAllNodes(hasTestTag("pomo_subject_list")).fetchSemanticsNodes().size)
+        composeTestRule.onNodeWithTag("pomo_karisik_info").assertIsDisplayed()
         val mixedPomoSubjects = vm.getSubjectsForTrackAndStage(stage = vm.pomoExamStage.value)
         assertTrue(mixedPomoSubjects.contains("TYT Türkçe"))
         assertTrue(mixedPomoSubjects.contains("Fizik"))
 
-        // Switch to Stopwatch tab and verify Karışık stage pill works
+        // Switch to Stopwatch tab and verify Karışık stage pill works and hides subject list
         composeTestRule.onNodeWithTag("nav_tab_stopwatch").performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("stopwatch_stage_KARISIK").assertIsDisplayed()
         composeTestRule.onNodeWithTag("stopwatch_stage_KARISIK").performClick()
         composeTestRule.waitForIdle()
         assertEquals("KARISIK", vm.stopwatchExamStage.value)
+        assertEquals("Karışık", vm.stopwatchSubject.value)
+        assertEquals(0, composeTestRule.onAllNodes(hasTestTag("stopwatch_subject_list")).fetchSemanticsNodes().size)
+        composeTestRule.onNodeWithTag("stopwatch_karisik_info").assertIsDisplayed()
         val mixedSwSubjects = vm.getSubjectsForTrackAndStage(stage = vm.stopwatchExamStage.value)
         assertTrue(mixedSwSubjects.contains("Paragraf"))
         assertTrue(mixedSwSubjects.contains("Geometri"))
@@ -1527,5 +1596,306 @@ class AppUiTest {
         composeTestRule.onNodeWithTag("settings_tab_1").performClick()
         composeTestRule.waitForIdle()
         assertEquals(0, composeTestRule.onAllNodes(hasTestTag("settings_refresh_username_btn")).fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun `daily average counts unlogged days as zero since first app usage`() {
+        val now = System.currentTimeMillis()
+        val nineDaysAgo = now - (9L * 24L * 3600L * 1000L)
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(now))
+        val stats = StudyStatsCalculator.compute(
+            sessions = emptyList(),
+            notes = listOf(
+                DailyNote(
+                    dateStr = todayStr,
+                    noteText = "Tek gün kayıt",
+                    studyDurationMinutes = 100,
+                    timestamp = now
+                )
+            ),
+            firstUsageTimestampMillis = nineDaysAgo,
+            nowMillis = now
+        )
+        // 10 inclusive calendar days (9 days ago .. today) -> 100 / 10 = 10 min/day
+        assertEquals(100, stats.totalAllTimeMinutes)
+        assertEquals(10, stats.averageDailyMinutes)
+        assertEquals(1, stats.activeDaysCount)
+    }
+
+    @Test
+    @Config(sdk = [36], qualifiers = "tr-rTR-w412dp-h915dp")
+    fun `statistics paydos notes start collapsed and countdown labels show TYT AYT without YKS`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = AppDatabase.getDatabase(context)
+        runBlocking {
+            db.studySessionDao().clearAllSessions()
+            db.dailyNoteDao().clearAllNotes()
+            db.dailyNoteDao().insertOrUpdateNote(
+                DailyNote(
+                    dateStr = "2026-11-20",
+                    noteText = "Bugün çok verimli paydos yaptım",
+                    mood = "Motive & Özgüvenli",
+                    studyDurationMinutes = 60,
+                    timestamp = System.currentTimeMillis()
+                )
+            )
+        }
+        completeOnboarding("Arda", "Sayısal", "YKS")
+        val vm = ViewModelProvider(composeTestRule.activity)[StudyViewModel::class.java]
+        assertEquals("TYT 2027", vm.tytCountdown.value?.title)
+        assertEquals("AYT 2027", vm.aytCountdown.value?.title)
+        assertEquals("TYT 2027", ExamWidgetUpdater.loadExamItems(context).first().title)
+
+        scrollVerticalListToTag("dashboard_stats_detail_btn")
+        composeTestRule.onNodeWithTag("dashboard_stats_detail_btn").performClick()
+        composeTestRule.waitForIdle()
+
+        scrollVerticalListToTag("stats_notes_toggle")
+        composeTestRule.onNodeWithTag("stats_notes_toggle").assertIsDisplayed()
+        assertEquals(0, composeTestRule.onAllNodesWithText("Bugün çok verimli paydos yaptım").fetchSemanticsNodes().size)
+
+        composeTestRule.onNodeWithTag("stats_notes_toggle").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange))
+            .performScrollToNode(androidx.compose.ui.test.hasText("Bugün çok verimli paydos yaptım"))
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Bugün çok verimli paydos yaptım").assertIsDisplayed()
+    }
+
+    @Test
+    @Config(sdk = [36], qualifiers = "tr-rTR-w412dp-h915dp")
+    fun `selected exam counter persists across dashboard and small widget and stopwatch reset shows zero`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        UserPreferences(context).clear()
+        completeOnboarding("Ece", "Sayısal", "YKS")
+        val vm = ViewModelProvider(composeTestRule.activity)[StudyViewModel::class.java]
+
+        // Switch dashboard exam ticker to AYT 2027 and verify persisted preference
+        composeTestRule.runOnUiThread {
+            vm.selectDashboardExam(1, "AYT 2027")
+        }
+        composeTestRule.waitForIdle()
+        val vmCtx = vm.getApplication<android.app.Application>()
+        assertEquals(1, UserPreferences(vmCtx).selectedDashboardExamIndex)
+        assertEquals("AYT 2027", UserPreferences(vmCtx).selectedDashboardExamTitle)
+
+        // Verify pitch-black widget uses full opacity border and black-to-accent radial gradient bitmap
+        UserPreferences(context).apply {
+            appAccentColorHex = "#FF00BFA5"
+            appThemeMode = "DARK"
+            isPitchBlackDarkEnabled = true
+        }
+        val pitchPalette = ExamWidgetUpdater.resolveWidgetTheme(context)
+        assertEquals(255, Color.alpha(pitchPalette.borderColor))
+        assertTrue(Color.green(pitchPalette.borderColor) > 120)
+        val gradientBmp = ExamWidgetUpdater.getOrCreatePitchBlackGradientBitmap(pitchPalette.accentColor)
+        assertEquals(Color.BLACK, gradientBmp.getPixel(gradientBmp.width / 2, gradientBmp.height / 2))
+        val edgePixel = gradientBmp.getPixel(gradientBmp.width - 10, gradientBmp.height / 2)
+        assertTrue(Color.green(edgePixel) > 80)
+
+        // Verify stopwatch widget hides Chronometer & displays 00:00 after reset
+        ActiveTimerManager.startStopwatch(context, "Matematik")
+        ActiveTimerManager.resetStopwatch(context)
+        assertEquals(0L, vm.stopwatchElapsedMillis.value)
+        assertFalse(ActiveTimerManager.snapshot.value.stopwatch.active)
+
+        val appWidgetManager = AppWidgetManager.getInstance(context)
+        val shadowMgr = Shadows.shadowOf(appWidgetManager)
+        val swId = shadowMgr.createWidget(StopwatchWidgetProvider::class.java, R.layout.widget_stopwatch)
+        StopwatchWidgetProvider().updateWidgets(context, appWidgetManager, intArrayOf(swId))
+        val swView = shadowMgr.getViewFor(swId)
+        val staticTv = swView.findViewById<android.widget.TextView>(R.id.widget_sw_static_time)
+        val chrono = swView.findViewById<android.widget.Chronometer>(R.id.widget_sw_chronometer)
+        assertEquals(android.view.View.VISIBLE, staticTv.visibility)
+        assertEquals("00:00", staticTv.text.toString())
+        assertEquals(android.view.View.GONE, chrono.visibility)
+        val swBgImg = swView.findViewById<android.widget.ImageView>(R.id.widget_bg_fill_layer)
+        assertTrue(swBgImg.drawable is android.graphics.drawable.BitmapDrawable)
+
+        // Verify small widget index & title persistence
+        val singleId = shadowMgr.createWidget(ExamCountdownWidgetProvider::class.java, R.layout.widget_exam_countdown)
+        val provider = ExamCountdownWidgetProvider()
+        val items = ExamWidgetUpdater.loadExamItems(context)
+        provider.onReceive(
+            context,
+            Intent(ExamCountdownWidgetProvider.ACTION_NEXT_EXAM).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, singleId)
+        )
+        val widgetPrefs = context.getSharedPreferences("baslayalim_widget_prefs", Context.MODE_PRIVATE)
+        composeTestRule.waitUntil(timeoutMillis = 3_000L) {
+            widgetPrefs.getInt("idx_$singleId", -1) == 1
+        }
+        assertEquals(1, widgetPrefs.getInt("idx_$singleId", -1))
+        assertEquals(items[1].title, widgetPrefs.getString("title_$singleId", ""))
+
+        UserPreferences(context).clear()
+        UserPreferences(vmCtx).clear()
+    }
+
+    @Test
+    @Config(sdk = [36], qualifiers = "tr-rTR-w412dp-h915dp")
+    fun `applicationId is com alierdemsenol baslayalim and standardized labels have no emojis firar or dnd`() {
+        assertEquals("com.alierdemsenol.baslayalim", BuildConfig.APPLICATION_ID)
+        assertEquals("0.0.6", BuildConfig.VERSION_NAME)
+
+        val forbidden = listOf("firar", "acil durum", "aynen devam", "rahatsız etmeyin", "rahatsiz etmeyin")
+        val allTextKeys = listOf(
+            "btn_pause", "btn_continue", "btn_end", "pomo_finish_session",
+            "stopwatch_pause", "stopwatch_resume", "stopwatch_stop_save",
+            "timer_footer_note", "app_name", "version_label", "dev_options_unlocked",
+            "focus_unlock_tap_btn", "focus_slide_to_unlock"
+        )
+        for (lang in listOf("TR", "EN")) {
+            for (key in allTextKeys) {
+                val txt = TranslationHelper.getTranslation(key, lang)
+                val lower = txt.lowercase(Locale.ROOT)
+                forbidden.forEach { term ->
+                    assertFalse("Forbidden term '$term' in $key ($lang): $txt", lower.contains(term))
+                }
+                assertFalse("Emoji found in $key ($lang): $txt", txt.any { ch ->
+                    Character.isSurrogate(ch) || ch.code in 0x2600..0x27BF
+                })
+            }
+        }
+
+        completeOnboarding("Zeynep", "Sayısal", "YKS")
+        composeTestRule.onNodeWithTag("nav_tab_timer_hub").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("timer_hub_tab_0").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("timer_start_btn").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("timer_focus_lock_btn").assertIsDisplayed()
+        assertFalse(
+            composeTestRule.onNodeWithTag("timer_focus_lock_btn").fetchSemanticsNode().boundsInRoot
+                .overlaps(composeTestRule.onNodeWithTag("timer_pause_btn").fetchSemanticsNode().boundsInRoot)
+        )
+        composeTestRule.onNodeWithTag("timer_pause_btn").assertTextEquals("Duraklat")
+        composeTestRule.onNodeWithTag("timer_pause_btn").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("timer_resume_btn").assertTextEquals("Devam")
+        composeTestRule.onNodeWithTag("timer_end_btn").assertTextEquals("Sonlandır")
+        composeTestRule.onNodeWithTag("timer_end_btn").performClick()
+        composeTestRule.waitForIdle()
+    }
+
+    @Test
+    @Config(sdk = [36], qualifiers = "tr-rTR-w412dp-h915dp")
+    fun `stopwatch karisik laps offer optional before and after lap subjects without requiring selection`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = AppDatabase.getDatabase(context)
+        db.studySessionDao().clearAllSessions()
+        ActiveTimerManager.resetStopwatch(context)
+
+        completeOnboarding("Efe", "Sayısal", "YKS")
+        val vm = ViewModelProvider(composeTestRule.activity)[StudyViewModel::class.java]
+
+        composeTestRule.onNodeWithTag("nav_tab_stopwatch").performClick()
+        composeTestRule.waitForIdle()
+
+        // Switch stopwatch to Karisik
+        composeTestRule.onNodeWithTag("stopwatch_stage_KARISIK").performClick()
+        composeTestRule.waitForIdle()
+
+        // Simulate 120s running -> add lap -> 180s total -> pause
+        val snapField = ActiveTimerManager::class.java.getDeclaredField("_snapshot")
+        snapField.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val snapFlow = snapField.get(ActiveTimerManager) as kotlinx.coroutines.flow.MutableStateFlow<com.example.util.ActiveTimerSnapshot>
+
+        composeTestRule.runOnUiThread {
+            ActiveTimerManager.startStopwatch(context, "Karışık")
+            snapFlow.value = snapFlow.value.copy(
+                stopwatch = snapFlow.value.stopwatch.copy(
+                    active = true,
+                    isRunning = true,
+                    startEpochMs = 0L,
+                    accumulatedMs = 120_000L,
+                    subject = "Karışık",
+                    examStage = "KARISIK"
+                )
+            )
+            vm.addStopwatchLap()
+            snapFlow.value = snapFlow.value.copy(
+                stopwatch = snapFlow.value.stopwatch.copy(
+                    active = true,
+                    isRunning = false,
+                    startEpochMs = 0L,
+                    accumulatedMs = 180_000L,
+                    subject = "Karışık",
+                    examStage = "KARISIK"
+                )
+            )
+        }
+        composeTestRule.waitForIdle()
+
+        // Tap Sonlandir -> dialog shows optional before & after lap sections
+        composeTestRule.onNodeWithTag("stopwatch_save_btn").assertTextEquals("Sonlandır")
+        composeTestRule.onNodeWithTag("stopwatch_save_btn").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("stopwatch_save_stage_dialog").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("stopwatch_karisik_before_lap_section").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("stopwatch_karisik_after_lap_section").assertIsDisplayed()
+
+        // 1. Confirm WITHOUT choosing optional subjects -> saves single "Karışık" session
+        composeTestRule.onNodeWithTag("stopwatch_confirm_save_btn").performClick()
+        composeTestRule.waitForIdle()
+        val sessionsAfterDefault = db.studySessionDao().getAllSessionsOnce()
+        assertEquals(1, sessionsAfterDefault.size)
+        assertEquals("Karışık", sessionsAfterDefault.first().subject)
+        assertEquals("KARISIK", sessionsAfterDefault.first().examStage)
+
+        // 2. Run again with lap and pick Matematik before lap, Fizik after lap -> splits into 2 sessions
+        db.studySessionDao().clearAllSessions()
+        composeTestRule.runOnUiThread {
+            val baseNow = System.currentTimeMillis()
+            ActiveTimerManager.startStopwatch(context, "Karışık")
+            snapFlow.value = snapFlow.value.copy(
+                stopwatch = snapFlow.value.stopwatch.copy(
+                    active = true,
+                    isRunning = true,
+                    startEpochMs = baseNow - 120_000L,
+                    accumulatedMs = 0L,
+                    subject = "Karışık",
+                    examStage = "KARISIK"
+                )
+            )
+            vm.addStopwatchLap()
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.runOnUiThread {
+            val baseNow = System.currentTimeMillis()
+            snapFlow.value = snapFlow.value.copy(
+                stopwatch = snapFlow.value.stopwatch.copy(
+                    startEpochMs = baseNow - 180_000L
+                )
+            )
+            vm.pauseStopwatch()
+        }
+        composeTestRule.waitForIdle()
+        assertTrue(vm.stopwatchElapsedMillis.value >= 180_000L)
+        assertEquals(1, vm.stopwatchLaps.value.size)
+
+        composeTestRule.onNodeWithTag("stopwatch_save_btn").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("sw_before_lap_Matematik").performClick()
+        composeTestRule.onNode(
+            SemanticsMatcher.keyIsDefined(SemanticsProperties.HorizontalScrollAxisRange)
+                .and(androidx.compose.ui.test.hasAnyAncestor(hasTestTag("stopwatch_karisik_after_lap_section")))
+        ).performScrollToNode(hasTestTag("sw_after_lap_Fizik"))
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("sw_after_lap_Fizik").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("stopwatch_confirm_save_btn").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.waitUntil(timeoutMillis = 3_000L) {
+            Shadows.shadowOf(Looper.getMainLooper()).idle()
+            runBlocking { db.studySessionDao().getAllSessionsOnce().size == 2 }
+        }
+        val splitSessions = db.studySessionDao().getAllSessionsOnce()
+        assertEquals(2, splitSessions.size)
+        assertTrue(splitSessions.any { it.subject == "Matematik" && it.durationSeconds in 118L..125L && it.examStage == "KARISIK" })
+        assertTrue(splitSessions.any { it.subject == "Fizik" && it.durationSeconds in 55L..65L && it.examStage == "KARISIK" })
     }
 }

@@ -527,6 +527,7 @@ object BackupHelper {
                 userTrack = root.optString("userTrack", "Sayısal").ifBlank { "Sayısal" },
                 ydtLanguage = root.optString("ydtLanguage", "İngilizce").ifBlank { "İngilizce" },
                 syncedAtMillis = root.optLong("syncedAtMillis", System.currentTimeMillis()),
+                firstUsageTimestamp = root.optLong("firstUsageTime", 0L),
                 customTytExamDate = root.optLong("customTytExamDate", UserPreferences.defaultTytExamMillis()),
                 customAytExamDate = root.optLong("customAytExamDate", UserPreferences.defaultAytExamMillis()),
                 customMsuExamDate = root.optLong("customMsuExamDate", UserPreferences.defaultMsuExamMillis()),

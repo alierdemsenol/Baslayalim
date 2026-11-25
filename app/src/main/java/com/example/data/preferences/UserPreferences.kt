@@ -36,6 +36,10 @@ class UserPreferences(context: Context) {
         private const val KEY_PARENT_LAST_SYNC_AT = "key_parent_last_sync_at"
         private const val KEY_DEVICE_UNIQUE_CODE = "key_device_unique_code"
         private const val KEY_PITCH_BLACK_DARK = "key_pitch_black_dark"
+        private const val KEY_SELECTED_EXAM_INDEX = "key_selected_exam_index"
+        private const val KEY_SELECTED_EXAM_TITLE = "key_selected_exam_title"
+        private const val KEY_SELECTED_TIMER_HUB_TAB = "key_selected_timer_hub_tab"
+        private const val KEY_SELECTED_MAIN_TAB = "key_selected_main_tab"
 
         const val ROLE_STUDENT = "STUDENT"
         const val ROLE_PARENT = "PARENT"
@@ -194,6 +198,30 @@ class UserPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_PITCH_BLACK_DARK, false)
         set(value) {
             prefs.edit().putBoolean(KEY_PITCH_BLACK_DARK, value).commit()
+        }
+
+    var selectedDashboardExamIndex: Int
+        get() = prefs.getInt(KEY_SELECTED_EXAM_INDEX, 0).coerceAtLeast(0)
+        set(value) {
+            prefs.edit().putInt(KEY_SELECTED_EXAM_INDEX, value.coerceAtLeast(0)).commit()
+        }
+
+    var selectedDashboardExamTitle: String
+        get() = prefs.getString(KEY_SELECTED_EXAM_TITLE, "") ?: ""
+        set(value) {
+            prefs.edit().putString(KEY_SELECTED_EXAM_TITLE, value).commit()
+        }
+
+    var selectedTimerHubTab: Int
+        get() = prefs.getInt(KEY_SELECTED_TIMER_HUB_TAB, 0).coerceIn(0, 1)
+        set(value) {
+            prefs.edit().putInt(KEY_SELECTED_TIMER_HUB_TAB, value.coerceIn(0, 1)).commit()
+        }
+
+    var selectedMainTab: Int
+        get() = prefs.getInt(KEY_SELECTED_MAIN_TAB, 0).coerceIn(0, 2)
+        set(value) {
+            prefs.edit().putInt(KEY_SELECTED_MAIN_TAB, value.coerceIn(0, 2)).commit()
         }
 
     var isAmoledModeEnabled: Boolean

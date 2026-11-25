@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Date
 import java.util.Locale
 
@@ -52,12 +53,10 @@ enum class PomodoroState {
     SESSION_FINISHED_DAILY_STATS
 }
 
-enum class EmergencyPromptTarget {
-    POMODORO_PAUSE,
-    POMODORO_STOP,
-    STOPWATCH_PAUSE,
-    STOPWATCH_STOP,
-    NONE
+enum class FocusModeTarget {
+    TIMER,
+    POMODORO,
+    STOPWATCH
 }
 
 data class YKSExamCountdown(
@@ -162,18 +161,48 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     private val _savedBooks = MutableStateFlow(SavedBookHelper.decodeList(prefs.savedBooksJson))
     val savedBooks: StateFlow<List<SavedBookEntry>> = _savedBooks.asStateFlow()
 
+    private val _selectedDashboardExamIndex = MutableStateFlow(prefs.selectedDashboardExamIndex)
+    val selectedDashboardExamIndex: StateFlow<Int> = _selectedDashboardExamIndex.asStateFlow()
+
+    private val _selectedDashboardExamTitle = MutableStateFlow(prefs.selectedDashboardExamTitle)
+    val selectedDashboardExamTitle: StateFlow<String> = _selectedDashboardExamTitle.asStateFlow()
+
+    private val _selectedTimerHubTab = MutableStateFlow(prefs.selectedTimerHubTab)
+    val selectedTimerHubTab: StateFlow<Int> = _selectedTimerHubTab.asStateFlow()
+
+    private val _selectedMainTab = MutableStateFlow(prefs.selectedMainTab)
+    val selectedMainTab: StateFlow<Int> = _selectedMainTab.asStateFlow()
+
+    private val _focusLockedTarget = MutableStateFlow<FocusModeTarget?>(null)
+    val focusLockedTarget: StateFlow<FocusModeTarget?> = _focusLockedTarget.asStateFlow()
+
+    private val _openStopwatchSaveDialogTrigger = MutableStateFlow(0)
+    val openStopwatchSaveDialogTrigger: StateFlow<Int> = _openStopwatchSaveDialogTrigger.asStateFlow()
+
     private val _parentSnapshot = MutableStateFlow<ParentStudentSnapshot?>(
         prefs.parentSyncedPayloadJson.takeIf { it.isNotBlank() }?.let { BackupHelper.parseParentStudentSnapshot(it) }
     )
     val parentSnapshot: StateFlow<ParentStudentSnapshot?> = _parentSnapshot.asStateFlow()
 
     private val _parentStats = MutableStateFlow(
-        _parentSnapshot.value?.let { StudyStatsCalculator.compute(it.sessions, it.dailyNotes) } ?: DashboardStats()
+        _parentSnapshot.value?.let {
+            StudyStatsCalculator.compute(
+                sessions = it.sessions,
+                notes = it.dailyNotes,
+                firstUsageTimestampMillis = it.firstUsageTimestamp.takeIf { ts -> ts > 0L }
+            )
+        } ?: DashboardStats()
     )
     val parentStats: StateFlow<DashboardStats> = _parentStats.asStateFlow()
 
     private val _parentWeeklyStats = MutableStateFlow(
-        _parentSnapshot.value?.let { StudyStatsCalculator.computeWeekly(it.sessions, it.dailyNotes) } ?: DashboardStats()
+        _parentSnapshot.value?.let {
+            StudyStatsCalculator.computeWeekly(
+                sessions = it.sessions,
+                notes = it.dailyNotes,
+                firstUsageTimestampMillis = it.firstUsageTimestamp.takeIf { ts -> ts > 0L }
+            )
+        } ?: DashboardStats()
     )
     val parentWeeklyStats: StateFlow<DashboardStats> = _parentWeeklyStats.asStateFlow()
 
@@ -237,6 +266,10 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         _userLanguage.value = lang
         _isAmoledModeEnabled.value = prefs.isAmoledModeEnabled
         _isPitchBlackDarkEnabled.value = prefs.isPitchBlackDarkEnabled
+        _selectedDashboardExamIndex.value = prefs.selectedDashboardExamIndex
+        _selectedDashboardExamTitle.value = prefs.selectedDashboardExamTitle
+        _selectedTimerHubTab.value = prefs.selectedTimerHubTab
+        _selectedMainTab.value = prefs.selectedMainTab
         _todayQuote.value = MotivationalQuotes.getQuoteForUsageDay(prefs.usageDaysCount, lang)
         refreshParentSnapshotFromPrefs()
         normalizeStagesAndSubjectsForProfile(prefs.userTrack, prefs.examTarget, prefs.ydtLanguage)
@@ -248,8 +281,20 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         val raw = prefs.parentSyncedPayloadJson
         val parsed = if (raw.isNotBlank()) BackupHelper.parseParentStudentSnapshot(raw) else null
         _parentSnapshot.value = parsed
-        _parentStats.value = parsed?.let { StudyStatsCalculator.compute(it.sessions, it.dailyNotes) } ?: DashboardStats()
-        _parentWeeklyStats.value = parsed?.let { StudyStatsCalculator.computeWeekly(it.sessions, it.dailyNotes) } ?: DashboardStats()
+        _parentStats.value = parsed?.let {
+            StudyStatsCalculator.compute(
+                sessions = it.sessions,
+                notes = it.dailyNotes,
+                firstUsageTimestampMillis = it.firstUsageTimestamp.takeIf { ts -> ts > 0L }
+            )
+        } ?: DashboardStats()
+        _parentWeeklyStats.value = parsed?.let {
+            StudyStatsCalculator.computeWeekly(
+                sessions = it.sessions,
+                notes = it.dailyNotes,
+                firstUsageTimestampMillis = it.firstUsageTimestamp.takeIf { ts -> ts > 0L }
+            )
+        } ?: DashboardStats()
     }
 
     fun setUserRole(role: String) {
@@ -322,6 +367,11 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         _isOnboarded.value = false
         _isAmoledModeEnabled.value = false
         _isPitchBlackDarkEnabled.value = false
+        _selectedDashboardExamIndex.value = 0
+        _selectedDashboardExamTitle.value = ""
+        _selectedTimerHubTab.value = 0
+        _selectedMainTab.value = 0
+        _focusLockedTarget.value = null
         _userLanguage.value = UserPreferences.resolveSystemLanguage()
         normalizeStagesAndSubjectsForProfile("Sayısal", "YKS", "İngilizce", forceDefaultSubject = true)
         refreshExamCountdowns()
@@ -331,6 +381,34 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     fun setAmoledModeEnabled(enabled: Boolean) {
         prefs.isAmoledModeEnabled = enabled
         _isAmoledModeEnabled.value = enabled
+    }
+
+    fun toggleFocusLock(target: FocusModeTarget) {
+        _focusLockedTarget.value = if (_focusLockedTarget.value == target) null else target
+    }
+
+    fun clearFocusLock() {
+        _focusLockedTarget.value = null
+    }
+
+    fun selectDashboardExam(index: Int, title: String) {
+        val safeIdx = index.coerceAtLeast(0)
+        prefs.selectedDashboardExamIndex = safeIdx
+        prefs.selectedDashboardExamTitle = title
+        _selectedDashboardExamIndex.value = safeIdx
+        _selectedDashboardExamTitle.value = title
+    }
+
+    fun selectTimerHubTab(tab: Int) {
+        val clamped = tab.coerceIn(0, 1)
+        prefs.selectedTimerHubTab = clamped
+        _selectedTimerHubTab.value = clamped
+    }
+
+    fun selectMainTab(tab: Int) {
+        val clamped = tab.coerceIn(0, 2)
+        prefs.selectedMainTab = clamped
+        _selectedMainTab.value = clamped
     }
 
     fun setPitchBlackDarkEnabled(enabled: Boolean) {
@@ -572,7 +650,9 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         _stopwatchExamStage.value = swStage
 
         val pomoValid = getPomodoroSubjects(track, target, pomoStage, ydtLang)
-        if (forceDefaultSubject || _selectedSubject.value !in pomoValid) {
+        if (pomoStage == "KARISIK") {
+            _selectedSubject.value = "Karışık"
+        } else if (forceDefaultSubject || _selectedSubject.value !in pomoValid) {
             _selectedSubject.value = pomoValid.firstOrNull() ?: "TYT Türkçe"
         }
 
@@ -588,7 +668,9 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val swValid = getSubjectsForTrackAndStage(track, target, swStage, ydtLang)
-        if (forceDefaultSubject || _stopwatchSubject.value !in swValid) {
+        if (swStage == "KARISIK") {
+            _stopwatchSubject.value = "Karışık"
+        } else if (forceDefaultSubject || _stopwatchSubject.value !in swValid) {
             _stopwatchSubject.value = swValid.firstOrNull() ?: "TYT Türkçe"
         }
     }
@@ -750,14 +832,6 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     val customTimers: StateFlow<List<CustomTimer>> = repository.allCustomTimers
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val totalEmergencyCount: StateFlow<Int> = allSessions.combine(todaySessions) { all, _ ->
-        all.sumOf { it.emergencyCount }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
-
-    val totalFirarCount: StateFlow<Int> = allSessions.combine(todaySessions) { all, _ ->
-        all.count { it.sessionType == "FİRAR" }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
-
     // ==========================================
     // 1. COUNTDOWNS & CUSTOM TIMERS (Zero per-second churn on MainDashboard)
     // ==========================================
@@ -812,10 +886,10 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         // Stopwatch sync
         val sw = snap.stopwatch
         val swNormStage = normalizeStageForTrack(sw.examStage, allowMixed = true)
-        _stopwatchSubject.value = sw.subject
+        _stopwatchSubject.value = if (swNormStage == "KARISIK") "Karışık" else sw.subject
         _stopwatchExamStage.value = swNormStage
         _stopwatchIsRunning.value = sw.isRunning
-        _stopwatchElapsedMillis.value = sw.currentElapsedMillis(now)
+        _stopwatchElapsedMillis.value = if (!sw.isRunning && !sw.active) 0L else sw.currentElapsedMillis(now)
         _stopwatchLaps.value = sw.laps.map {
             StopwatchLap(it.lapNumber, it.lapTimeMillis, it.totalTimeMillis)
         }
@@ -823,6 +897,10 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
             ensureStopwatchUiLoop()
         } else {
             stopwatchJob?.cancel()
+            stopwatchJob = null
+        }
+        if (!sw.isRunning && !sw.active && _focusLockedTarget.value == FocusModeTarget.STOPWATCH) {
+            _focusLockedTarget.value = null
         }
 
         // Custom Timer sync
@@ -841,6 +919,10 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
             ensureCustomTimerUiLoop()
         } else {
             customCountdownJob?.cancel()
+            customCountdownJob = null
+        }
+        if (!tm.isRunning && !tm.isPaused && _focusLockedTarget.value == FocusModeTarget.TIMER) {
+            _focusLockedTarget.value = null
         }
 
         // Pomodoro sync
@@ -850,8 +932,9 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         } catch (_: Exception) {
             PomodoroState.IDLE
         }
-        _selectedSubject.value = pm.subject
-        _pomoExamStage.value = normalizeStageForTrack(pm.examStage, allowMixed = true)
+        val pmNormStage = normalizeStageForTrack(pm.examStage, allowMixed = true)
+        _selectedSubject.value = if (pmNormStage == "KARISIK") "Karışık" else pm.subject
+        _pomoExamStage.value = pmNormStage
         _workDurationMinutes.value = pm.workMinutes
         _breakDurationMinutes.value = pm.breakMinutes
         _longBreakMinutes.value = pm.longBreakMinutes
@@ -860,11 +943,19 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         _pomoRemainingSeconds.value = pm.currentRemainingSeconds(now)
         _currentSessionCompletedBlocks.value = pm.completedBlocks
         _currentSessionTotalWorkSeconds.value = pm.currentTotalWorkSeconds(now)
-        currentActiveEmergencyCount = pm.emergencyCount
         if (pState == PomodoroState.WORKING || pState == PomodoroState.BREAKING) {
             ensurePomodoroUiLoop()
         } else {
             pomodoroJob?.cancel()
+            pomodoroJob = null
+        }
+        if (pState != PomodoroState.WORKING &&
+            pState != PomodoroState.WORK_PAUSED &&
+            pState != PomodoroState.BREAKING &&
+            pState != PomodoroState.BREAK_PAUSED &&
+            _focusLockedTarget.value == FocusModeTarget.POMODORO
+        ) {
+            _focusLockedTarget.value = null
         }
     }
 
@@ -883,8 +974,8 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         _msuDaysRemaining.value = computeDaysLeft(msuDate.time, now)
 
         val isTr = _userLanguage.value.equals("TR", ignoreCase = true)
-        _tytCountdown.value = calculateCountdown("YKS - TYT 2027", tytDate, now)
-        _aytCountdown.value = calculateCountdown("YKS - AYT 2027", aytDate, now)
+        _tytCountdown.value = calculateCountdown("TYT 2027", tytDate, now)
+        _aytCountdown.value = calculateCountdown("AYT 2027", aytDate, now)
         _lgsCountdown.value = calculateCountdown(if (isTr) "LGS Sınavı 2027" else "LGS Exam 2027", lgsDate, now)
         _kpssCountdown.value = calculateCountdown(if (isTr) "KPSS Lisans 2027" else "KPSS Exam 2027", kpssDate, now)
         _msuCountdown.value = calculateCountdown(if (isTr) "MSÜ Sınavı 2027" else "MSÜ Exam 2027", msuDate, now)
@@ -960,47 +1051,6 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ==========================================
-    // 2. EMERGENCY DIALOG PROMPT
-    // ==========================================
-    private val _emergencyPromptTarget = MutableStateFlow(EmergencyPromptTarget.NONE)
-    val emergencyPromptTarget: StateFlow<EmergencyPromptTarget> = _emergencyPromptTarget.asStateFlow()
-
-    private var currentActiveEmergencyCount = 0
-
-    fun requestEmergencyPrompt(target: EmergencyPromptTarget) {
-        _emergencyPromptTarget.value = target
-    }
-
-    fun respondEmergencyPrompt(isEmergency: Boolean) {
-        val target = _emergencyPromptTarget.value
-        _emergencyPromptTarget.value = EmergencyPromptTarget.NONE
-
-        if (isEmergency) {
-            currentActiveEmergencyCount += 1
-            when (target) {
-                EmergencyPromptTarget.POMODORO_PAUSE -> executePomodoroPause()
-                EmergencyPromptTarget.POMODORO_STOP -> executePomodoroStop()
-                EmergencyPromptTarget.STOPWATCH_PAUSE -> pauseStopwatch()
-                EmergencyPromptTarget.STOPWATCH_STOP -> stopAndSaveStopwatch()
-                EmergencyPromptTarget.NONE -> {}
-            }
-        } else {
-            _toastEvent.value = t("toast_no_emergency_continue")
-        }
-    }
-
-    fun respondEmergencyFirar() {
-        val target = _emergencyPromptTarget.value
-        _emergencyPromptTarget.value = EmergencyPromptTarget.NONE
-
-        when (target) {
-            EmergencyPromptTarget.POMODORO_PAUSE, EmergencyPromptTarget.POMODORO_STOP -> abandonPomodoroFirar()
-            EmergencyPromptTarget.STOPWATCH_PAUSE, EmergencyPromptTarget.STOPWATCH_STOP -> resetStopwatch()
-            EmergencyPromptTarget.NONE -> {}
-        }
-    }
-
-    // ==========================================
     // 3. POMODORO TIMER LOGIC
     // ==========================================
     private val _selectedSubject = MutableStateFlow(getSubjectsForTrack(prefs.userTrack, prefs.examTarget).firstOrNull() ?: "TYT Türkçe")
@@ -1040,8 +1090,12 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     fun selectPomoExamStage(stage: String) {
         val norm = normalizeStageForTrack(stage, allowMixed = true)
         _pomoExamStage.value = norm
-        val valid = getPomodoroSubjects(_userTrack.value, _examTarget.value, norm)
-        val nextSubject = if (_selectedSubject.value in valid) _selectedSubject.value else (valid.firstOrNull() ?: _selectedSubject.value)
+        val nextSubject = if (norm == "KARISIK") {
+            "Karışık"
+        } else {
+            val valid = getPomodoroSubjects(_userTrack.value, _examTarget.value, norm)
+            if (_selectedSubject.value in valid) _selectedSubject.value else (valid.firstOrNull() ?: _selectedSubject.value)
+        }
         _selectedSubject.value = nextSubject
         ActiveTimerManager.updatePomodoroConfig(getApplication(), subject = nextSubject, examStage = norm)
     }
@@ -1102,8 +1156,12 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    private fun executePomodoroPause() {
-        ActiveTimerManager.pausePomodoro(getApplication(), incrementEmergency = true)
+    fun pausePomodoroWork() {
+        ActiveTimerManager.pausePomodoro(getApplication(), incrementEmergency = false)
+    }
+
+    fun pausePomodoroBreak() {
+        ActiveTimerManager.pausePomodoro(getApplication(), incrementEmergency = false)
     }
 
     fun resumePomodoroWork() {
@@ -1147,11 +1205,10 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         ActiveTimerManager.resumePomodoroBreak(getApplication())
     }
 
-    private fun executePomodoroStop() {
+    fun finishPomodoroEarly() {
         val snap = ActiveTimerManager.ensureInitialized(getApplication())
         val totalWorkSec = snap.pomodoro.currentTotalWorkSeconds()
         val blocksDone = snap.pomodoro.completedBlocks
-        val emergCount = snap.pomodoro.emergencyCount
         val subj = snap.pomodoro.subject
         val stage = snap.pomodoro.examStage
 
@@ -1162,40 +1219,13 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                     durationSeconds = totalWorkSec,
                     sessionType = "POMODORO",
                     blocksCompleted = blocksDone,
-                    emergencyCount = emergCount,
+                    emergencyCount = 0,
                     examStage = stage
                 )
                 repository.insertSession(session)
                 ExamWidgetUpdater.updateAllWidgets(getApplication())
             }
-            ActiveTimerManager.finishPomodoroToDailyStats(getApplication())
-            AppActionLogger.logAction(getApplication(), "POMODORO", "stop_save dur=${totalWorkSec}s")
-        }
-    }
-
-    fun abandonPomodoroFirar() {
-        val snap = ActiveTimerManager.ensureInitialized(getApplication())
-        val totalWorkSec = snap.pomodoro.currentTotalWorkSeconds()
-        val blocksDone = snap.pomodoro.completedBlocks
-        val emergCount = snap.pomodoro.emergencyCount
-        val subj = snap.pomodoro.subject
-        val stage = snap.pomodoro.examStage
-
-        viewModelScope.launch {
-            if (totalWorkSec > 0) {
-                val session = StudySession(
-                    subject = subj,
-                    durationSeconds = totalWorkSec,
-                    sessionType = "FİRAR",
-                    blocksCompleted = blocksDone,
-                    emergencyCount = emergCount,
-                    examStage = stage
-                )
-                repository.insertSession(session)
-                ExamWidgetUpdater.updateAllWidgets(getApplication())
-            }
-            AppActionLogger.logAction(getApplication(), "POMODORO", "abandon_firar dur=${totalWorkSec}s")
-            _toastEvent.value = t("toast_firar_detected")
+            AppActionLogger.logAction(getApplication(), "POMODORO", "finish_early dur=${totalWorkSec}s")
             ActiveTimerManager.finishPomodoroToDailyStats(getApplication())
         }
     }
@@ -1394,28 +1424,28 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         ActiveTimerManager.pauseCustomTimer(getApplication())
     }
 
-    fun abandonCustomTimerFirar() {
+    fun finishCustomTimerEarly() {
         val snap = ActiveTimerManager.ensureInitialized(getApplication())
         val tm = snap.customTimer
         val elapsedSec = (tm.totalSec - tm.currentRemainingSeconds()).coerceAtLeast(0)
         if (elapsedSec > 0) {
             viewModelScope.launch {
                 val subjName = if (tm.isDenemeMode) tm.denemeType else tm.subject
+                val sessType = if (tm.isDenemeMode) "DENEME" else "SAYAÇ"
                 repository.insertSession(
                     StudySession(
                         subject = subjName,
                         durationSeconds = elapsedSec.toLong(),
-                        sessionType = "FİRAR",
+                        sessionType = sessType,
                         blocksCompleted = 1,
-                        emergencyCount = 1,
+                        emergencyCount = 0,
                         examStage = tm.examStage
                     )
                 )
                 ExamWidgetUpdater.updateAllWidgets(getApplication())
             }
         }
-        AppActionLogger.logAction(getApplication(), "TIMER", "abandon_firar elapsed=${elapsedSec}s")
-        _toastEvent.value = t("toast_firar_detected")
+        AppActionLogger.logAction(getApplication(), "TIMER", "finish_early elapsed=${elapsedSec}s")
         ActiveTimerManager.resetCustomTimer(getApplication())
     }
 
@@ -1442,7 +1472,6 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     val stopwatchLaps: StateFlow<List<StopwatchLap>> = _stopwatchLaps.asStateFlow()
 
     private var stopwatchJob: Job? = null
-    private var stopwatchEmergencyCount = 0
 
     fun setStopwatchSubject(subject: String) {
         _stopwatchSubject.value = subject
@@ -1452,8 +1481,12 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     fun setStopwatchExamStage(stage: String) {
         val norm = normalizeStageForTrack(stage, allowMixed = true)
         _stopwatchExamStage.value = norm
-        val valid = getSubjectsForTrackAndStage(_userTrack.value, _examTarget.value, norm)
-        val nextSubject = if (_stopwatchSubject.value in valid) _stopwatchSubject.value else (valid.firstOrNull() ?: _stopwatchSubject.value)
+        val nextSubject = if (norm == "KARISIK") {
+            "Karışık"
+        } else {
+            val valid = getSubjectsForTrackAndStage(_userTrack.value, _examTarget.value, norm)
+            if (_stopwatchSubject.value in valid) _stopwatchSubject.value else (valid.firstOrNull() ?: _stopwatchSubject.value)
+        }
         _stopwatchSubject.value = nextSubject
         ActiveTimerManager.setStopwatchSubject(getApplication(), nextSubject)
         ActiveTimerManager.setStopwatchExamStage(getApplication(), norm)
@@ -1483,11 +1516,34 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         ActiveTimerManager.addStopwatchLap(getApplication())
     }
 
-    fun stopAndSaveStopwatch(examStageOverride: String? = null) {
+    fun requestOpenStopwatchSaveDialog() {
+        val snap = ActiveTimerManager.ensureInitialized(getApplication())
+        if (snap.stopwatch.isRunning) {
+            ActiveTimerManager.pauseStopwatch(getApplication())
+        }
+        _openStopwatchSaveDialogTrigger.value += 1
+    }
+
+    fun consumeStopwatchSaveDialogRequest() {
+        _openStopwatchSaveDialogTrigger.value = 0
+    }
+
+    fun stopAndSaveStopwatch(
+        examStageOverride: String? = null,
+        subjectOverride: String? = null
+    ) {
         val snap = ActiveTimerManager.ensureInitialized(getApplication())
         val durationSec = snap.stopwatch.currentElapsedMillis() / 1000L
-        val subj = snap.stopwatch.subject
+        val subj = subjectOverride?.takeIf { it.isNotBlank() } ?: snap.stopwatch.subject
         val stage = examStageOverride ?: snap.stopwatch.examStage
+        stopwatchJob?.cancel()
+        stopwatchJob = null
+        _stopwatchIsRunning.value = false
+        _stopwatchElapsedMillis.value = 0L
+        _stopwatchLaps.value = emptyList()
+        if (_focusLockedTarget.value == FocusModeTarget.STOPWATCH) {
+            _focusLockedTarget.value = null
+        }
         ActiveTimerManager.resetStopwatch(getApplication())
 
         if (durationSec > 0) {
@@ -1508,7 +1564,55 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun stopAndSaveStopwatchSegments(
+        segments: List<Pair<String, Long>>,
+        examStageOverride: String
+    ) {
+        val validSegments = segments.filter { it.second > 0L }
+        stopwatchJob?.cancel()
+        stopwatchJob = null
+        _stopwatchIsRunning.value = false
+        _stopwatchElapsedMillis.value = 0L
+        _stopwatchLaps.value = emptyList()
+        if (_focusLockedTarget.value == FocusModeTarget.STOPWATCH) {
+            _focusLockedTarget.value = null
+        }
+        ActiveTimerManager.resetStopwatch(getApplication())
+
+        if (validSegments.isNotEmpty()) {
+            viewModelScope.launch {
+                val baseTs = System.currentTimeMillis()
+                withContext(Dispatchers.IO) {
+                    validSegments.forEachIndexed { idx, (subj, durSec) ->
+                        val session = StudySession(
+                            subject = subj.ifBlank { "Karışık" },
+                            durationSeconds = durSec,
+                            sessionType = "KRONOMETRE",
+                            blocksCompleted = 1,
+                            emergencyCount = 0,
+                            timestamp = baseTs + idx.toLong(),
+                            examStage = examStageOverride
+                        )
+                        repository.insertSession(session)
+                    }
+                }
+                ExamWidgetUpdater.updateAllWidgets(getApplication())
+                val totalDur = validSegments.sumOf { it.second }
+                AppActionLogger.logAction(getApplication(), "STOPWATCH", "saved_segments count=${validSegments.size} dur=${totalDur}s")
+                _toastEvent.value = t("toast_stopwatch_saved")
+            }
+        }
+    }
+
     fun resetStopwatch() {
+        stopwatchJob?.cancel()
+        stopwatchJob = null
+        _stopwatchIsRunning.value = false
+        _stopwatchElapsedMillis.value = 0L
+        _stopwatchLaps.value = emptyList()
+        if (_focusLockedTarget.value == FocusModeTarget.STOPWATCH) {
+            _focusLockedTarget.value = null
+        }
         ActiveTimerManager.resetStopwatch(getApplication())
     }
 
@@ -1519,13 +1623,21 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val dashboardStats: StateFlow<DashboardStats> = combine(allSessions, allNotes) { sessions, notes ->
-        StudyStatsCalculator.compute(sessions, notes)
+        StudyStatsCalculator.compute(
+            sessions = sessions,
+            notes = notes,
+            firstUsageTimestampMillis = prefs.firstUsageTimestamp
+        )
     }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashboardStats())
 
     val weeklyDashboardStats: StateFlow<DashboardStats> = combine(allSessions, allNotes) { sessions, notes ->
-        StudyStatsCalculator.computeWeekly(sessions, notes)
+        StudyStatsCalculator.computeWeekly(
+            sessions = sessions,
+            notes = notes,
+            firstUsageTimestampMillis = prefs.firstUsageTimestamp
+        )
     }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashboardStats())
@@ -1725,6 +1837,11 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
             _userTrack.value = "Sayısal"
             _examTarget.value = "YKS"
             _isOnboarded.value = false
+            _selectedDashboardExamIndex.value = 0
+            _selectedDashboardExamTitle.value = ""
+            _selectedTimerHubTab.value = 0
+            _selectedMainTab.value = 0
+            _focusLockedTarget.value = null
             refreshExamCountdowns()
             ExamWidgetUpdater.updateAllWidgets(getApplication())
             AppActionLogger.logAction(getApplication(), "DATA", "clear_all")

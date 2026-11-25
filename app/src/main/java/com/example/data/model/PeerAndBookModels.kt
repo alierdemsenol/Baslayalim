@@ -278,6 +278,7 @@ data class ParentStudentSnapshot(
     val userTrack: String = "Sayısal",
     val ydtLanguage: String = "İngilizce",
     val syncedAtMillis: Long = 0L,
+    val firstUsageTimestamp: Long = 0L,
     val customTytExamDate: Long = 0L,
     val customAytExamDate: Long = 0L,
     val customMsuExamDate: Long = 0L,

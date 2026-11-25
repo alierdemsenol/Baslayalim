@@ -45,9 +45,11 @@ object StudyStatsCalculator {
 
     fun resolveStageLabel(rawStage: String, subject: String = ""): String {
         val s = rawStage.trim().uppercase(Locale.US)
+        if (s == "KARISIK" || s == "KARIŞIK" || s == "MIXED") return "GENEL"
         if (s == "TYT" || s == "AYT" || s == "YDT") return s
         val subUpper = subject.trim().uppercase(Locale.US)
         return when {
+            subUpper == "KARISIK" || subUpper == "KARIŞIK" || subUpper == "MIXED" -> "GENEL"
             subUpper.startsWith("TYT ") || subUpper == "PARAGRAF" || subUpper == "PROBLEM" -> "TYT"
             subUpper.startsWith("YDT ") -> "YDT"
             subUpper.startsWith("AYT ") -> "AYT"
@@ -83,10 +85,30 @@ object StudyStatsCalculator {
         return mondayKey to sundayKey
     }
 
+    private fun inclusiveCalendarDaysBetween(startMillis: Long, endMillis: Long): Int {
+        val startCal = Calendar.getInstance().apply {
+            timeInMillis = startMillis
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val endCal = Calendar.getInstance().apply {
+            timeInMillis = endMillis
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val diffMs = (endCal.timeInMillis - startCal.timeInMillis).coerceAtLeast(0L)
+        return ((diffMs / (24L * 3600L * 1000L)).toInt() + 1).coerceAtLeast(1)
+    }
+
     fun computeWeekly(
         sessions: List<StudySession>,
         notes: List<DailyNote>,
-        nowMillis: Long = System.currentTimeMillis()
+        nowMillis: Long = System.currentTimeMillis(),
+        firstUsageTimestampMillis: Long? = null
     ): DashboardStats {
         val dateFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
         val (weekStart, weekEnd) = currentWeekDateRangeKeys(nowMillis)
@@ -97,13 +119,42 @@ object StudyStatsCalculator {
         val weeklyNotes = notes.filter { n ->
             n.dateStr >= weekStart && n.dateStr <= weekEnd
         }
-        return compute(weeklySessions, weeklyNotes, nowMillis)
+        val weekStartCal = Calendar.getInstance().apply {
+            timeInMillis = nowMillis
+            firstDayOfWeek = Calendar.MONDAY
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val diffFromMonday = when (weekStartCal.get(Calendar.DAY_OF_WEEK)) {
+            Calendar.MONDAY -> 0
+            Calendar.TUESDAY -> 1
+            Calendar.WEDNESDAY -> 2
+            Calendar.THURSDAY -> 3
+            Calendar.FRIDAY -> 4
+            Calendar.SATURDAY -> 5
+            Calendar.SUNDAY -> 6
+            else -> 0
+        }
+        val daysInWeekSoFar = diffFromMonday + 1
+        val effectiveFirstUsage = firstUsageTimestampMillis?.takeIf { it > 0L }?.let { firstTs ->
+            val daysSinceFirst = inclusiveCalendarDaysBetween(firstTs, nowMillis)
+            val weekSpanDays = minOf(daysInWeekSoFar, daysSinceFirst).coerceAtLeast(1)
+            val spanCal = Calendar.getInstance().apply {
+                timeInMillis = nowMillis
+                add(Calendar.DAY_OF_YEAR, -(weekSpanDays - 1))
+            }
+            spanCal.timeInMillis
+        }
+        return compute(weeklySessions, weeklyNotes, nowMillis, effectiveFirstUsage)
     }
 
     fun compute(
         sessions: List<StudySession>,
         notes: List<DailyNote>,
-        nowMillis: Long = System.currentTimeMillis()
+        nowMillis: Long = System.currentTimeMillis(),
+        firstUsageTimestampMillis: Long? = null
     ): DashboardStats {
         val dateFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
         val todayStr = dateFmt.format(Date(nowMillis))
@@ -212,7 +263,12 @@ object StudyStatsCalculator {
             val am = agendaMinutesByDate[dateKey] ?: 0
             maxOf(sm, am) > 0
         }
-        val avgMinutes = if (activeDays > 0) totalMinutes / activeDays else 0
+        val totalDaysDenominator = if (firstUsageTimestampMillis != null && firstUsageTimestampMillis > 0L) {
+            maxOf(inclusiveCalendarDaysBetween(firstUsageTimestampMillis, nowMillis), activeDays, 1)
+        } else {
+            activeDays
+        }
+        val avgMinutes = if (totalDaysDenominator > 0) totalMinutes / totalDaysDenominator else 0
 
         val subjectStats = practiceTestsBySubject.entries
             .map { (subj, pair) -> SubjectPracticeStat(subj, pair.first, pair.second) }

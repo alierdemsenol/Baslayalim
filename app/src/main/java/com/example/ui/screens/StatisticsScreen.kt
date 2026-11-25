@@ -29,6 +29,8 @@ import androidx.compose.material.icons.filled.AvTimer
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PieChart
 import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material3.AlertDialog
@@ -82,6 +84,7 @@ fun StatisticsScreen(
 
     var showAddPastSessionDialog by remember { mutableStateOf(false) }
     var selectedStageFilter by remember { mutableStateOf("ALL") }
+    var isNotesExpanded by remember { mutableStateOf(false) }
 
     val hrS = TranslationHelper.getTranslation("hr_short", lang)
     val minS = TranslationHelper.getTranslation("min_short", lang)
@@ -266,29 +269,37 @@ fun StatisticsScreen(
 
             // Secondary All-Time KPIs (Daily Average, Tests, Reviewed Topics, Denemes)
             item(key = "stats_kpi_row_2") {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    DetailMiniStatBox(
-                        label = TranslationHelper.getTranslation("stats_avg_daily", lang),
-                        value = formatMinutes(allTimeStats.averageDailyMinutes),
-                        modifier = Modifier.weight(1f)
-                    )
-                    DetailMiniStatBox(
-                        label = TranslationHelper.getTranslation("stats_total_tests", lang),
-                        value = "${allTimeStats.totalTestsSolved}",
-                        modifier = Modifier.weight(1f)
-                    )
-                    DetailMiniStatBox(
-                        label = TranslationHelper.getTranslation("stats_topics_reviewed", lang),
-                        value = "${allTimeStats.totalTopicsReviewed}",
-                        modifier = Modifier.weight(1f)
-                    )
-                    DetailMiniStatBox(
-                        label = TranslationHelper.getTranslation("stats_total_denemes", lang),
-                        value = "${allTimeStats.totalDenemesSolved}",
-                        modifier = Modifier.weight(1f)
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        DetailMiniStatBox(
+                            label = TranslationHelper.getTranslation("stats_avg_daily", lang),
+                            value = formatMinutes(allTimeStats.averageDailyMinutes),
+                            modifier = Modifier.weight(1f)
+                        )
+                        DetailMiniStatBox(
+                            label = TranslationHelper.getTranslation("stats_total_tests", lang),
+                            value = "${allTimeStats.totalTestsSolved}",
+                            modifier = Modifier.weight(1f)
+                        )
+                        DetailMiniStatBox(
+                            label = TranslationHelper.getTranslation("stats_topics_reviewed", lang),
+                            value = "${allTimeStats.totalTopicsReviewed}",
+                            modifier = Modifier.weight(1f)
+                        )
+                        DetailMiniStatBox(
+                            label = TranslationHelper.getTranslation("stats_total_denemes", lang),
+                            value = "${allTimeStats.totalDenemesSolved}",
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = TranslationHelper.getTranslation("stats_avg_zero_hint", lang),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -711,70 +722,95 @@ fun StatisticsScreen(
                 }
             }
 
-            // Daily Notes Header
+            // Daily Notes Collapsible Header ("Paydos & Gün Sonu Notları")
             item(key = "stats_notes_header") {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = TranslationHelper.getTranslation("stats_notes_title", lang),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable { isNotesExpanded = !isNotesExpanded }
+                        .testTag("stats_notes_toggle"),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${TranslationHelper.getTranslation("stats_notes_title", lang)} (${allNotes.size})",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Icon(
+                            imageVector = if (isNotesExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                            contentDescription = TranslationHelper.getTranslation("stats_notes_title", lang),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
             }
 
-            if (allNotes.isEmpty()) {
-                item(key = "stats_notes_empty") {
-                    Text(
-                        text = TranslationHelper.getTranslation("stats_no_notes_yet", lang),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else {
-                items(allNotes, key = { "note_${it.dateStr}" }) { note ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+            if (isNotesExpanded) {
+                if (allNotes.isEmpty()) {
+                    item(key = "stats_notes_empty") {
+                        Text(
+                            text = TranslationHelper.getTranslation("stats_no_notes_yet", lang),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    items(allNotes, key = { "note_${it.dateStr}" }) { note ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = note.dateStr,
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    if (note.mood.isNotBlank()) {
-                                        Spacer(modifier = Modifier.width(8.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(
-                                            text = TranslationHelper.localizeMood(note.mood, lang),
-                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                            color = MaterialTheme.colorScheme.secondary
+                                            text = note.dateStr,
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        if (note.mood.isNotBlank()) {
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = TranslationHelper.localizeMood(note.mood, lang),
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = MaterialTheme.colorScheme.secondary
+                                            )
+                                        }
+                                    }
+                                    if (note.noteText.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = note.noteText,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
                                 }
-                                if (note.noteText.isNotBlank()) {
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = note.noteText,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+
+                                IconButton(onClick = { viewModel.deleteNote(note) }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = TranslationHelper.getTranslation("delete", lang),
+                                        tint = MaterialTheme.colorScheme.error
                                     )
                                 }
-                            }
-
-                            IconButton(onClick = { viewModel.deleteNote(note) }) {
-                                Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = TranslationHelper.getTranslation("delete", lang),
-                                    tint = MaterialTheme.colorScheme.error
-                                )
                             }
                         }
                     }

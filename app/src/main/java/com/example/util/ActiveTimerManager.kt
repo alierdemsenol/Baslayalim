@@ -39,10 +39,10 @@ data class PersistentStopwatchState(
     val laps: List<PersistentStopwatchLap> = emptyList()
 ) {
     fun currentElapsedMillis(now: Long = System.currentTimeMillis()): Long {
-        return if (isRunning && startEpochMs > 0L) {
-            (now - startEpochMs).coerceAtLeast(0L)
-        } else {
-            accumulatedMs.coerceAtLeast(0L)
+        return when {
+            isRunning && startEpochMs > 0L -> (now - startEpochMs).coerceAtLeast(0L)
+            active -> accumulatedMs.coerceAtLeast(0L)
+            else -> 0L
         }
     }
 }
@@ -154,14 +154,18 @@ object ActiveTimerManager {
         val defaultStage = if (userPrefs.examTarget == "YKS") "TYT" else ""
 
         val swLaps = decodeLaps(p.getString("sw_laps_json", "[]") ?: "[]")
+        val rawSwActive = p.getBoolean("sw_active", false)
+        val rawSwRunning = p.getBoolean("sw_running", false)
+        val rawSwStart = if (rawSwRunning) p.getLong("sw_start_epoch_ms", 0L) else 0L
+        val rawSwAcc = if (rawSwActive || rawSwRunning) p.getLong("sw_accumulated_ms", 0L) else 0L
         val sw = PersistentStopwatchState(
-            active = p.getBoolean("sw_active", false),
-            isRunning = p.getBoolean("sw_running", false),
-            startEpochMs = p.getLong("sw_start_epoch_ms", 0L),
-            accumulatedMs = p.getLong("sw_accumulated_ms", 0L),
+            active = rawSwActive,
+            isRunning = rawSwRunning,
+            startEpochMs = rawSwStart,
+            accumulatedMs = rawSwAcc,
             subject = p.getString("sw_subject", defaultSubject) ?: defaultSubject,
             examStage = p.getString("sw_exam_stage", defaultStage) ?: defaultStage,
-            laps = swLaps
+            laps = if (rawSwActive || rawSwRunning) swLaps else emptyList()
         )
 
         val tm = PersistentCustomTimerState(

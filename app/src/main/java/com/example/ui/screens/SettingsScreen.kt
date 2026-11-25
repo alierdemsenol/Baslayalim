@@ -47,7 +47,6 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Download
@@ -131,7 +130,6 @@ fun SettingsScreen(
     val currentTrack by viewModel.userTrack.collectAsState()
     val currentExamTarget by viewModel.examTarget.collectAsState()
     val currentYdtLang by viewModel.ydtLanguage.collectAsState()
-    val currentAmoledMode by viewModel.isAmoledModeEnabled.collectAsState()
     val currentPitchBlackDark by viewModel.isPitchBlackDarkEnabled.collectAsState()
     val currentThemeMode by viewModel.themeMode.collectAsState()
     val currentAccentColorHex by viewModel.accentColorHex.collectAsState()
@@ -140,6 +138,8 @@ fun SettingsScreen(
     val userRole by viewModel.userRole.collectAsState()
     val deviceUniqueCode by viewModel.deviceUniqueCode.collectAsState()
     val isParentPairingEnabled by viewModel.isParentPairingEnabled.collectAsState()
+    var versionTapCount by remember { mutableIntStateOf(0) }
+    var devOptionsUnlocked by remember { mutableStateOf(false) }
     val savedTransferDevices by viewModel.savedTransferDevices.collectAsState()
     val discoveredPeers by viewModel.discoveredPeers.collectAsState()
     val lanTransferStatus by viewModel.lanTransferStatus.collectAsState()
@@ -151,7 +151,6 @@ fun SettingsScreen(
     var selectedTarget by remember(currentExamTarget) { mutableStateOf(currentExamTarget) }
     var selectedTrack by remember(currentTrack) { mutableStateOf(currentTrack) }
     var selectedYdtLang by remember(currentYdtLang) { mutableStateOf(currentYdtLang) }
-    var isAmoledEnabled by remember(currentAmoledMode) { mutableStateOf(currentAmoledMode) }
 
     var showAddCustomTimerDialog by remember { mutableStateOf(false) }
     var showEditExamDialog by remember { mutableStateOf<String?>(null) }
@@ -863,55 +862,6 @@ fun SettingsScreen(
                     }
                 }
 
-                if (!isParent) {
-                    // DARK FOCUS MODE CARD (Student only)
-                    item(key = "settings_amoled") {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(20.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(16.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            imageVector = Icons.Filled.DarkMode,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = TranslationHelper.getTranslation("amoled_title", lang),
-                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = TranslationHelper.getTranslation("amoled_desc", lang),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Switch(
-                                    checked = isAmoledEnabled,
-                                    onCheckedChange = {
-                                        isAmoledEnabled = it
-                                        viewModel.setAmoledModeEnabled(it)
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
                 // EXAM DATES CARD (ABOVE Custom Timers — Both Student and Parent)
                 item(key = "settings_exam_dates") {
                     Card(
@@ -1206,7 +1156,23 @@ fun SettingsScreen(
                                 text = TranslationHelper.getTranslation("version_label", lang),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.testTag("about_version_text")
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        if (!devOptionsUnlocked) {
+                                            versionTapCount += 1
+                                            if (versionTapCount >= 7) {
+                                                devOptionsUnlocked = true
+                                                Toast.makeText(
+                                                    context,
+                                                    TranslationHelper.getTranslation("dev_options_unlocked", lang),
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        }
+                                    }
+                                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                                    .testTag("about_version_text")
                             )
 
                             Spacer(modifier = Modifier.height(2.dp))
@@ -1219,26 +1185,28 @@ fun SettingsScreen(
 
                             Spacer(modifier = Modifier.height(16.dp))
 
-                            OutlinedButton(
-                                onClick = {
-                                    scope.launch {
-                                        val (text, file) = viewModel.generatePrivacySafeBugReport()
-                                        bugReportText = text
-                                        bugReportFile = file
-                                        showBugReportDialog = true
-                                    }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("bug_report_btn"),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.Filled.BugReport, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(TranslationHelper.getTranslation("bug_report_btn", lang), fontWeight = FontWeight.SemiBold)
-                            }
+                            if (devOptionsUnlocked) {
+                                OutlinedButton(
+                                    onClick = {
+                                        scope.launch {
+                                            val (text, file) = viewModel.generatePrivacySafeBugReport()
+                                            bugReportText = text
+                                            bugReportFile = file
+                                            showBugReportDialog = true
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("bug_report_btn"),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(Icons.Filled.BugReport, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(TranslationHelper.getTranslation("bug_report_btn", lang), fontWeight = FontWeight.SemiBold)
+                                }
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
 
                             OutlinedButton(
                                 onClick = {

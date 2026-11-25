@@ -70,11 +70,13 @@ class StudyStatsWidgetProvider : AppWidgetProvider() {
         appWidgetIds.forEach { widgetId ->
             val options = appWidgetManager.getAppWidgetOptions(widgetId)
             val maxHeight = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 120)
+            val maxWidth = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 220)
 
             val views = RemoteViews(context.packageName, R.layout.widget_study_stats)
             ExamWidgetUpdater.applyBaseSurfaceTheme(views, palette)
 
             views.setInt(R.id.widget_stats_icon_flame, "setColorFilter", palette.primaryColor)
+            views.setViewVisibility(R.id.widget_stats_icon_flame, if (maxWidth in 1..175) View.GONE else View.VISIBLE)
             views.setTextViewText(R.id.widget_stats_header, headerText)
             views.setTextColor(R.id.widget_stats_header, palette.onSurfaceColor)
 

@@ -349,7 +349,7 @@ class StudyRepository(
                 "DENEME" -> if (isTr) "Deneme Sınavı" else "Mock Exam"
                 "SAYAÇ" -> if (isTr) "Sayaç" else "Timer"
                 "KRONOMETRE" -> if (isTr) "Kronometre" else "Stopwatch"
-                "FİRAR" -> if (isTr) "Yarım Kalan (Firar)" else "Abandoned"
+                "FİRAR" -> if (isTr) "Erken Sonlandırılan" else "Ended Early"
                 else -> session.sessionType
             }
 

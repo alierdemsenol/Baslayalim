@@ -75,13 +75,16 @@ class ExamCountdownWidgetProvider : AppWidgetProvider() {
                     val items = ExamWidgetUpdater.loadExamItems(context)
                     if (items.isNotEmpty()) {
                         val prefs = context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE)
-                        val curIdx = prefs.getInt("idx_$widgetId", 0).coerceIn(0, items.lastIndex)
+                        val curIdx = resolveSavedIndex(prefs, widgetId, items)
                         val nextIdx = if (action == ACTION_PREV_EXAM) {
                             if (curIdx > 0) curIdx - 1 else items.lastIndex
                         } else {
                             if (curIdx < items.lastIndex) curIdx + 1 else 0
                         }
-                        prefs.edit().putInt("idx_$widgetId", nextIdx).apply()
+                        prefs.edit()
+                            .putInt("idx_$widgetId", nextIdx)
+                            .putString("title_$widgetId", items[nextIdx].title)
+                            .commit()
                         AppActionLogger.logAction(context, "WIDGET", "switch_exam")
                         updateSingleWidget(context, AppWidgetManager.getInstance(context), widgetId, items)
                     }
@@ -94,8 +97,30 @@ class ExamCountdownWidgetProvider : AppWidgetProvider() {
 
     override fun onDeleted(context: Context, appWidgetIds: IntArray) {
         val prefs = context.getSharedPreferences(WIDGET_PREFS, Context.MODE_PRIVATE).edit()
-        appWidgetIds.forEach { prefs.remove("idx_$it") }
+        appWidgetIds.forEach {
+            prefs.remove("idx_$it")
+            prefs.remove("title_$it")
+        }
         prefs.apply()
+    }
+
+    private fun resolveSavedIndex(
+        prefs: android.content.SharedPreferences,
+        widgetId: Int,
+        items: List<WidgetExamItem>
+    ): Int {
+        if (items.isEmpty()) return 0
+        val savedTitle = prefs.getString("title_$widgetId", null)
+        if (!savedTitle.isNullOrBlank()) {
+            val match = items.indexOfFirst { it.title == savedTitle }
+            if (match >= 0) {
+                if (prefs.getInt("idx_$widgetId", -1) != match) {
+                    prefs.edit().putInt("idx_$widgetId", match).commit()
+                }
+                return match
+            }
+        }
+        return prefs.getInt("idx_$widgetId", 0).coerceIn(0, items.lastIndex)
     }
 
     internal fun updateSingleWidget(
@@ -121,12 +146,12 @@ class ExamCountdownWidgetProvider : AppWidgetProvider() {
         val maxHeight = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 80)
         val maxWidth = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 200)
         val isCompactHeight = maxHeight in 1..62
-        val isUltraNarrow = maxWidth in 1..155
+        val isUltraNarrow = maxWidth in 1..145
 
         views.setViewVisibility(R.id.widget_icon_flame, if (isUltraNarrow) View.GONE else View.VISIBLE)
 
         if (items.isNotEmpty()) {
-            val idx = prefs.getInt("idx_$widgetId", 0).coerceIn(0, items.lastIndex)
+            val idx = resolveSavedIndex(prefs, widgetId, items)
             val current = items[idx]
             val daysText = ExamWidgetUpdater.formatCountdownText(current.title, current.daysRemaining, isTr)
             views.setTextViewText(R.id.widget_days_text, daysText)

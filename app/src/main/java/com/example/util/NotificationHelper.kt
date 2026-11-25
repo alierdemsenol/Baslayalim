@@ -30,6 +30,7 @@ object NotificationHelper {
     const val EXTRA_TIMER_MODE = "extra_timer_mode"
     const val EXTRA_OPEN_AGENDA = "extra_open_agenda"
     const val EXTRA_OPEN_STOPWATCH = "extra_open_stopwatch"
+    const val EXTRA_OPEN_STOPWATCH_SAVE_DIALOG = "extra_open_stopwatch_save_dialog"
 
     fun createNotificationChannel(context: Context) {
         try {
@@ -122,7 +123,7 @@ object NotificationHelper {
             )
             builder.addAction(
                 R.drawable.ic_notification,
-                if (isTr) "Devam Et" else "Resume",
+                if (isTr) "Devam" else "Resume",
                 resumePi
             )
 

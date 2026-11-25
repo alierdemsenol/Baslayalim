@@ -157,10 +157,10 @@ fun ParentDashboardScreen(
             "LGS" -> list.add((if (isTr) "LGS 2027" else "LGS 2027 Exam") to daysFor(snap?.customLgsExamDate ?: 0L, lgsDays))
             "KPSS" -> list.add((if (isTr) "KPSS Lisans 2027" else "KPSS 2027 Exam") to daysFor(snap?.customKpssExamDate ?: 0L, kpssDays))
             else -> {
-                list.add("YKS (TYT) 2027" to daysFor(snap?.customTytExamDate ?: 0L, tytDays))
-                list.add("YKS (AYT) 2027" to daysFor(snap?.customAytExamDate ?: 0L, aytDays))
+                list.add("TYT 2027" to daysFor(snap?.customTytExamDate ?: 0L, tytDays))
+                list.add("AYT 2027" to daysFor(snap?.customAytExamDate ?: 0L, aytDays))
                 if (activeTrack.trim().equals("Dil", ignoreCase = true)) {
-                    list.add("YKS (YDT) 2027" to daysFor(snap?.customAytExamDate ?: 0L, aytDays))
+                    list.add("YDT 2027" to daysFor(snap?.customAytExamDate ?: 0L, aytDays))
                 }
                 list.add("MSÜ 2027" to daysFor(snap?.customMsuExamDate ?: 0L, msuDays))
             }
@@ -170,9 +170,18 @@ fun ParentDashboardScreen(
         }
         list
     }
-    var examIdx by remember { mutableIntStateOf(0) }
-    val safeExamIdx = if (countdownItems.isNotEmpty()) examIdx.coerceIn(0, countdownItems.lastIndex) else 0
-    val currentExam = countdownItems.getOrElse(safeExamIdx) { "YKS (TYT) 2027" to tytDays }
+    val savedExamIdx by viewModel.selectedDashboardExamIndex.collectAsState()
+    val savedExamTitle by viewModel.selectedDashboardExamTitle.collectAsState()
+    val safeExamIdx = remember(countdownItems, savedExamIdx, savedExamTitle) {
+        if (countdownItems.isEmpty()) 0
+        else {
+            val match = if (savedExamTitle.isNotBlank()) {
+                countdownItems.indexOfFirst { it.first == savedExamTitle }
+            } else -1
+            if (match >= 0) match else savedExamIdx.coerceIn(0, countdownItems.lastIndex)
+        }
+    }
+    val currentExam = countdownItems.getOrElse(safeExamIdx) { "TYT 2027" to tytDays }
 
     Box(
         modifier = Modifier
@@ -271,7 +280,10 @@ fun ParentDashboardScreen(
                     ) {
                         IconButton(
                             onClick = {
-                                examIdx = if (safeExamIdx > 0) safeExamIdx - 1 else countdownItems.lastIndex
+                                if (countdownItems.isNotEmpty()) {
+                                    val nextIdx = if (safeExamIdx > 0) safeExamIdx - 1 else countdownItems.lastIndex
+                                    viewModel.selectDashboardExam(nextIdx, countdownItems[nextIdx].first)
+                                }
                             },
                             modifier = Modifier.size(48.dp)
                         ) {
@@ -311,7 +323,10 @@ fun ParentDashboardScreen(
                         }
                         IconButton(
                             onClick = {
-                                examIdx = if (safeExamIdx < countdownItems.lastIndex) safeExamIdx + 1 else 0
+                                if (countdownItems.isNotEmpty()) {
+                                    val nextIdx = if (safeExamIdx < countdownItems.lastIndex) safeExamIdx + 1 else 0
+                                    viewModel.selectDashboardExam(nextIdx, countdownItems[nextIdx].first)
+                                }
                             },
                             modifier = Modifier.size(48.dp)
                         ) {

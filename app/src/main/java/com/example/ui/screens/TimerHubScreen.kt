@@ -33,8 +33,20 @@ import kotlinx.coroutines.launch
 @Composable
 fun TimerHubScreen(viewModel: StudyViewModel) {
     val lang by viewModel.userLanguage.collectAsState()
-    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 2 })
+    val savedHubTab by viewModel.selectedTimerHubTab.collectAsState()
+    val pagerState = rememberPagerState(initialPage = savedHubTab.coerceIn(0, 1), pageCount = { 2 })
     val scope = rememberCoroutineScope()
+
+    androidx.compose.runtime.LaunchedEffect(pagerState.currentPage) {
+        viewModel.selectTimerHubTab(pagerState.currentPage)
+    }
+
+    androidx.compose.runtime.LaunchedEffect(savedHubTab) {
+        val clamped = savedHubTab.coerceIn(0, 1)
+        if (pagerState.currentPage != clamped) {
+            pagerState.scrollToPage(clamped)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -68,6 +80,7 @@ fun TimerHubScreen(viewModel: StudyViewModel) {
                                 else MaterialTheme.colorScheme.surfaceVariant
                             )
                             .clickable {
+                                viewModel.selectTimerHubTab(0)
                                 scope.launch { pagerState.scrollToPage(0) }
                             }
                             .padding(vertical = 8.dp)
@@ -94,6 +107,7 @@ fun TimerHubScreen(viewModel: StudyViewModel) {
                                 else MaterialTheme.colorScheme.surfaceVariant
                             )
                             .clickable {
+                                viewModel.selectTimerHubTab(1)
                                 scope.launch { pagerState.scrollToPage(1) }
                             }
                             .padding(vertical = 8.dp)

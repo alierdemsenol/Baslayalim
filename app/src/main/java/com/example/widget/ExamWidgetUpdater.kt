@@ -5,7 +5,14 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.RadialGradient
+import android.graphics.RectF
+import android.graphics.Shader
 import android.widget.RemoteViews
 import androidx.core.graphics.ColorUtils
 import com.example.R
@@ -69,7 +76,7 @@ object ExamWidgetUpdater {
                     isPitchBlack = true,
                     accentColor = accentColor,
                     backgroundColor = bg,
-                    borderColor = ColorUtils.blendARGB(bg, accentColor, 0.85f),
+                    borderColor = ColorUtils.blendARGB(bg, accentColor, 0.72f),
                     pillBackgroundColor = ColorUtils.blendARGB(bg, accentColor, 0.24f),
                     pillTextColor = ColorUtils.blendARGB(accentColor, Color.WHITE, 0.20f),
                     rowBackgroundColor = ColorUtils.blendARGB(0xFF0B0B0E.toInt(), accentColor, 0.08f),
@@ -116,9 +123,73 @@ object ExamWidgetUpdater {
         }
     }
 
+    private val pitchBlackGradientCache = java.util.concurrent.ConcurrentHashMap<Int, Bitmap>()
+
+    fun getOrCreatePitchBlackGradientBitmap(accentColor: Int): Bitmap {
+        return pitchBlackGradientCache.getOrPut(accentColor) {
+            val width = 420
+            val height = 260
+            val cornerRadius = 38f
+            val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val pixels = IntArray(width * height)
+            val cx = width / 2f
+            val cy = height / 2f
+            val halfW = width / 2f
+            val halfH = height / 2f
+            val accentR = Color.red(accentColor)
+            val accentG = Color.green(accentColor)
+            val accentB = Color.blue(accentColor)
+
+            for (y in 0 until height) {
+                val dyNorm = ((y + 0.5f) - cy) / halfH
+                val dyCorner = kotlin.math.abs((y + 0.5f) - cy) - (halfH - cornerRadius)
+                val rowOffset = y * width
+                for (x in 0 until width) {
+                    val dxCorner = kotlin.math.abs((x + 0.5f) - cx) - (halfW - cornerRadius)
+                    val cornerAlpha = if (dxCorner > 0f && dyCorner > 0f) {
+                        val dist = kotlin.math.hypot(dxCorner.toDouble(), dyCorner.toDouble()).toFloat() - cornerRadius
+                        ((0.5f - dist).coerceIn(0f, 1f) * 255f).toInt()
+                    } else {
+                        255
+                    }
+                    if (cornerAlpha <= 0) {
+                        pixels[rowOffset + x] = 0
+                        continue
+                    }
+
+                    val dxNorm = ((x + 0.5f) - cx) / halfW
+                    val normR = kotlin.math.sqrt((dxNorm * dxNorm + dyNorm * dyNorm).toDouble()).toFloat()
+                    // Keep inner text area pure #000000, then smoothly fade to accent past the text towards edges
+                    val accentRatio = when {
+                        normR <= 0.56f -> 0f
+                        normR <= 0.78f -> ((normR - 0.56f) / 0.22f) * 0.24f
+                        normR <= 0.94f -> 0.24f + ((normR - 0.78f) / 0.16f) * 0.26f
+                        else -> (0.50f + ((normR - 0.94f) / 0.28f) * 0.22f).coerceAtMost(0.72f)
+                    }
+                    val r = (accentR * accentRatio).toInt().coerceIn(0, 255)
+                    val g = (accentG * accentRatio).toInt().coerceIn(0, 255)
+                    val b = (accentB * accentRatio).toInt().coerceIn(0, 255)
+                    pixels[rowOffset + x] = (cornerAlpha shl 24) or (r shl 16) or (g shl 8) or b
+                }
+            }
+            bmp.setPixels(pixels, 0, width, 0, 0, width, height)
+            bmp
+        }
+    }
+
     fun applyBaseSurfaceTheme(views: RemoteViews, palette: WidgetThemePalette) {
-        views.setInt(R.id.widget_bg_fill_layer, "setColorFilter", palette.backgroundColor)
+        if (palette.isPitchBlack) {
+            views.setInt(R.id.widget_bg_fill_layer, "setColorFilter", 0)
+            views.setImageViewBitmap(
+                R.id.widget_bg_fill_layer,
+                getOrCreatePitchBlackGradientBitmap(palette.accentColor)
+            )
+        } else {
+            views.setImageViewResource(R.id.widget_bg_fill_layer, R.drawable.widget_shape_fill)
+            views.setInt(R.id.widget_bg_fill_layer, "setColorFilter", palette.backgroundColor)
+        }
         views.setInt(R.id.widget_bg_border_layer, "setColorFilter", palette.borderColor)
+        views.setInt(R.id.widget_bg_border_layer, "setImageAlpha", 255)
     }
 
     fun formatCountdownText(examTitleOrKey: String, daysRemaining: Long, isTr: Boolean): String {
@@ -185,10 +256,10 @@ object ExamWidgetUpdater {
                 items.add(buildItem(if (isTr) "KPSS Lisans 2027" else "KPSS 2027 Exam", kpssDate))
             }
             else -> {
-                items.add(buildItem("YKS (TYT) 2027", tytDate))
-                items.add(buildItem("YKS (AYT) 2027", aytDate))
+                items.add(buildItem("TYT 2027", tytDate))
+                items.add(buildItem("AYT 2027", aytDate))
                 if (track.trim().equals("Dil", ignoreCase = true)) {
-                    items.add(buildItem("YKS (YDT) 2027", aytDate))
+                    items.add(buildItem("YDT 2027", aytDate))
                 }
                 items.add(buildItem("MSÜ 2027", msuDate))
             }
@@ -219,13 +290,21 @@ object ExamWidgetUpdater {
             val prefs = UserPreferences(context)
             val parentSnap = loadParentSnapshotIfActive(prefs)
             if (parentSnap != null) {
-                return StudyStatsCalculator.compute(parentSnap.sessions, parentSnap.dailyNotes)
+                return StudyStatsCalculator.compute(
+                    sessions = parentSnap.sessions,
+                    notes = parentSnap.dailyNotes,
+                    firstUsageTimestampMillis = parentSnap.firstUsageTimestamp.takeIf { it > 0L }
+                )
             }
             val db = AppDatabase.getDatabase(context)
             kotlinx.coroutines.runBlocking {
                 val sessions = db.studySessionDao().getAllSessionsOnce()
                 val notes = db.dailyNoteDao().getAllNotesOnce()
-                StudyStatsCalculator.compute(sessions, notes)
+                StudyStatsCalculator.compute(
+                    sessions = sessions,
+                    notes = notes,
+                    firstUsageTimestampMillis = prefs.firstUsageTimestamp
+                )
             }
         } catch (_: Throwable) {
             DashboardStats()
@@ -237,13 +316,21 @@ object ExamWidgetUpdater {
             val prefs = UserPreferences(context)
             val parentSnap = loadParentSnapshotIfActive(prefs)
             if (parentSnap != null) {
-                return StudyStatsCalculator.computeWeekly(parentSnap.sessions, parentSnap.dailyNotes)
+                return StudyStatsCalculator.computeWeekly(
+                    sessions = parentSnap.sessions,
+                    notes = parentSnap.dailyNotes,
+                    firstUsageTimestampMillis = parentSnap.firstUsageTimestamp.takeIf { it > 0L }
+                )
             }
             val db = AppDatabase.getDatabase(context)
             kotlinx.coroutines.runBlocking {
                 val sessions = db.studySessionDao().getAllSessionsOnce()
                 val notes = db.dailyNoteDao().getAllNotesOnce()
-                StudyStatsCalculator.computeWeekly(sessions, notes)
+                StudyStatsCalculator.computeWeekly(
+                    sessions = sessions,
+                    notes = notes,
+                    firstUsageTimestampMillis = prefs.firstUsageTimestamp
+                )
             }
         } catch (_: Throwable) {
             DashboardStats()

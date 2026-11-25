@@ -38,6 +38,22 @@ class AllExamsWidgetProvider : AppWidgetProvider() {
         }
     }
 
+    override fun onAppWidgetOptionsChanged(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetId: Int,
+        newOptions: android.os.Bundle
+    ) {
+        val pendingResult: PendingResult? = goAsync()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                updateWidgets(context, appWidgetManager, intArrayOf(appWidgetId))
+            } finally {
+                pendingResult?.finish()
+            }
+        }
+    }
+
     internal fun updateWidgets(
         context: Context,
         appWidgetManager: AppWidgetManager,
@@ -48,6 +64,11 @@ class AllExamsWidgetProvider : AppWidgetProvider() {
         val palette = ExamWidgetUpdater.resolveWidgetTheme(context)
         val isTr = UserPreferences.resolveSystemLanguage() == "TR"
         val headerText = if (isTr) "Başlayalım • Sınavlar" else "Başlayalım • Exams"
+        val targetBadgeText = if (prefs.examTarget == "YKS") {
+            if (prefs.userTrack.equals("Dil", ignoreCase = true)) "TYT • YDT" else "TYT • AYT"
+        } else {
+            prefs.examTarget
+        }
 
         val rowIds = listOf(
             ExamRowViews(R.id.widget_row_1, R.id.widget_row_1_bg, R.id.widget_row_1_title, R.id.widget_row_1_days),
@@ -57,6 +78,14 @@ class AllExamsWidgetProvider : AppWidgetProvider() {
         )
 
         appWidgetIds.forEach { widgetId ->
+            val options = appWidgetManager.getAppWidgetOptions(widgetId)
+            val maxHeight = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 160)
+            val maxVisibleRows = when {
+                maxHeight in 1..95 -> 2
+                maxHeight in 1..130 -> 3
+                else -> 4
+            }
+
             val views = RemoteViews(context.packageName, R.layout.widget_all_exams)
             ExamWidgetUpdater.applyBaseSurfaceTheme(views, palette)
 
@@ -65,12 +94,12 @@ class AllExamsWidgetProvider : AppWidgetProvider() {
             views.setTextColor(R.id.widget_all_header, palette.onSurfaceColor)
 
             views.setInt(R.id.widget_all_target_badge_bg, "setColorFilter", palette.pillBackgroundColor)
-            views.setTextViewText(R.id.widget_all_target_badge, prefs.examTarget)
+            views.setTextViewText(R.id.widget_all_target_badge, targetBadgeText)
             views.setTextColor(R.id.widget_all_target_badge, palette.pillTextColor)
 
             rowIds.forEachIndexed { index, row ->
                 val item = items.getOrNull(index)
-                if (item != null) {
+                if (item != null && index < maxVisibleRows) {
                     views.setViewVisibility(row.containerId, View.VISIBLE)
                     views.setInt(row.bgId, "setColorFilter", palette.rowBackgroundColor)
                     views.setTextViewText(row.titleId, item.title)

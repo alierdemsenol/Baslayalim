@@ -136,11 +136,10 @@ class StopwatchWidgetProvider : AppWidgetProvider() {
 
         val localizedSubject = TranslationHelper.localizeSubject(sw.subject, lang)
         val subjectBadge = if (prefs.examTarget == "YKS" && sw.examStage.isNotBlank()) {
-            val stageLabel = when (sw.examStage) {
+            when (sw.examStage) {
                 "KARISIK" -> if (isTr) "Karışık" else "Mixed"
-                else -> sw.examStage
+                else -> "${sw.examStage} • $localizedSubject"
             }
-            "$stageLabel • $localizedSubject"
         } else {
             localizedSubject
         }
@@ -159,34 +158,52 @@ class StopwatchWidgetProvider : AppWidgetProvider() {
         val saveLabel = if (isTr) "Kaydet" else "Save"
 
         val baseTime = SystemClock.elapsedRealtime() - elapsedMs
+        val staticTimeText = formatStaticElapsed(elapsedMs)
 
         appWidgetIds.forEach { widgetId ->
             val options = appWidgetManager.getAppWidgetOptions(widgetId)
             val maxHeight = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 120)
+            val maxWidth = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 220)
             val isCompactHeight = maxHeight in 1..92
+            val isCompactWidth = maxWidth in 1..175
 
             val views = RemoteViews(context.packageName, R.layout.widget_stopwatch)
             ExamWidgetUpdater.applyBaseSurfaceTheme(views, palette)
 
             // Header & Subject pill theme
             views.setInt(R.id.widget_sw_icon, "setColorFilter", palette.primaryColor)
+            views.setViewVisibility(R.id.widget_sw_icon, if (isCompactWidth) View.GONE else View.VISIBLE)
             views.setTextViewText(R.id.widget_sw_title, titleText)
             views.setTextColor(R.id.widget_sw_title, palette.onSurfaceColor)
 
             views.setInt(R.id.widget_sw_subject_bg, "setColorFilter", palette.pillBackgroundColor)
             views.setTextViewText(R.id.widget_sw_subject_badge, subjectBadge)
             views.setTextColor(R.id.widget_sw_subject_badge, palette.pillTextColor)
+            views.setViewVisibility(R.id.widget_sw_subject_pill, if (maxWidth in 1..140) View.GONE else View.VISIBLE)
 
-            // Live synchronized Chronometer
-            views.setChronometer(R.id.widget_sw_chronometer, baseTime, null, sw.isRunning)
-            views.setTextColor(R.id.widget_sw_chronometer, palette.onSurfaceColor)
+            // Live synchronized Chronometer only when actively running; static TextView otherwise
+            if (sw.isRunning) {
+                views.setViewVisibility(R.id.widget_sw_chronometer, View.VISIBLE)
+                views.setChronometer(R.id.widget_sw_chronometer, baseTime, null, true)
+                views.setTextColor(R.id.widget_sw_chronometer, palette.onSurfaceColor)
+                views.setViewVisibility(R.id.widget_sw_static_time, View.GONE)
+            } else {
+                views.setChronometer(R.id.widget_sw_chronometer, SystemClock.elapsedRealtime(), null, false)
+                views.setViewVisibility(R.id.widget_sw_chronometer, View.GONE)
+                views.setViewVisibility(R.id.widget_sw_static_time, View.VISIBLE)
+                views.setTextViewText(R.id.widget_sw_static_time, staticTimeText)
+                views.setTextColor(R.id.widget_sw_static_time, palette.onSurfaceColor)
+            }
 
             views.setTextViewText(R.id.widget_sw_status_text, statusText)
             views.setTextColor(
                 R.id.widget_sw_status_text,
                 if (sw.isRunning || isPausedWithTime) palette.primaryColor else palette.onSurfaceVariantColor
             )
-            views.setViewVisibility(R.id.widget_sw_status_text, if (isCompactHeight) View.GONE else View.VISIBLE)
+            views.setViewVisibility(
+                R.id.widget_sw_status_text,
+                if (isCompactHeight || isCompactWidth) View.GONE else View.VISIBLE
+            )
 
             // Action button colors
             views.setInt(R.id.widget_sw_btn_start_bg, "setColorFilter", palette.primaryColor)
@@ -221,7 +238,7 @@ class StopwatchWidgetProvider : AppWidgetProvider() {
 
             // Open Stopwatch screen when tapping header or clock area
             val openAppIntent = Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra(NotificationHelper.EXTRA_OPEN_STOPWATCH, true)
             }
             val openPi = PendingIntent.getActivity(
@@ -233,6 +250,19 @@ class StopwatchWidgetProvider : AppWidgetProvider() {
             views.setOnClickPendingIntent(R.id.widget_sw_header_area, openPi)
             views.setOnClickPendingIntent(R.id.widget_sw_clock_area, openPi)
 
+            // Save button opens app to Stopwatch save stage/subject dialog
+            val saveAppIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(NotificationHelper.EXTRA_OPEN_STOPWATCH, true)
+                putExtra(NotificationHelper.EXTRA_OPEN_STOPWATCH_SAVE_DIALOG, true)
+            }
+            val savePi = PendingIntent.getActivity(
+                context,
+                9350 + widgetId,
+                saveAppIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
             // Action broadcasts
             views.setOnClickPendingIntent(
                 R.id.widget_sw_btn_start,
@@ -242,16 +272,25 @@ class StopwatchWidgetProvider : AppWidgetProvider() {
                 R.id.widget_sw_btn_pause,
                 buildBroadcastPi(context, ACTION_SW_PAUSE, 9200 + widgetId)
             )
-            views.setOnClickPendingIntent(
-                R.id.widget_sw_btn_save,
-                buildBroadcastPi(context, ACTION_SW_SAVE, 9300 + widgetId)
-            )
+            views.setOnClickPendingIntent(R.id.widget_sw_btn_save, savePi)
             views.setOnClickPendingIntent(
                 R.id.widget_sw_btn_reset,
                 buildBroadcastPi(context, ACTION_SW_RESET, 9400 + widgetId)
             )
 
             appWidgetManager.updateAppWidget(widgetId, views)
+        }
+    }
+
+    private fun formatStaticElapsed(elapsedMs: Long): String {
+        val totalSec = (elapsedMs / 1000L).coerceAtLeast(0L)
+        val h = totalSec / 3600L
+        val m = (totalSec % 3600L) / 60L
+        val s = totalSec % 60L
+        return if (h > 0L) {
+            String.format(java.util.Locale.US, "%02d:%02d:%02d", h, m, s)
+        } else {
+            String.format(java.util.Locale.US, "%02d:%02d", m, s)
         }
     }
 

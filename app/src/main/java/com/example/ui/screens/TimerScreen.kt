@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,15 +28,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
@@ -53,6 +57,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.viewmodel.FocusModeTarget
 import com.example.ui.viewmodel.StudyViewModel
 import com.example.util.TranslationHelper
 import kotlinx.coroutines.flow.StateFlow
@@ -75,6 +80,9 @@ fun TimerScreen(viewModel: StudyViewModel) {
     val totalSecs by viewModel.timerTotalSeconds.collectAsState()
     val isRunning by viewModel.timerIsRunning.collectAsState()
     val isPaused by viewModel.timerIsPaused.collectAsState()
+    val focusLockedTarget by viewModel.focusLockedTarget.collectAsState()
+    val isFocusLocked = focusLockedTarget == FocusModeTarget.TIMER
+    val canFocusLock = isRunning || isPaused
 
     val availableSubjects = remember(userTrack, examTarget, timerExamStage, ydtLanguage) {
         viewModel.getTimerSubjects(userTrack, examTarget, timerExamStage, ydtLanguage)
@@ -105,6 +113,48 @@ fun TimerScreen(viewModel: StudyViewModel) {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.fillMaxWidth()
             ) {
+                if (canFocusLock) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .padding(bottom = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isFocusLocked) {
+                            Text(
+                                text = TranslationHelper.getTranslation("focus_lock_armed", lang),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 8.dp)
+                                    .testTag("timer_focus_lock_armed")
+                            )
+                        } else {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+
+                        IconButton(
+                            onClick = { viewModel.toggleFocusLock(FocusModeTarget.TIMER) },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (isFocusLocked) MaterialTheme.colorScheme.primaryContainer
+                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                                )
+                                .testTag("timer_focus_lock_btn")
+                        ) {
+                            Icon(
+                                imageVector = if (isFocusLocked) Icons.Filled.Lock else Icons.Outlined.LockOpen,
+                                contentDescription = TranslationHelper.getTranslation("focus_lock_enable", lang),
+                                tint = if (isFocusLocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
                 if (!isRunning && !isPaused) {
                     if (examTarget == "YKS") {
                         ExamStageSelectorRow(
@@ -353,7 +403,7 @@ fun TimerScreen(viewModel: StudyViewModel) {
                         Icon(Icons.Filled.Pause, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            TranslationHelper.getTranslation("btn_emergency_pause", lang),
+                            TranslationHelper.getTranslation("btn_pause", lang),
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                         )
                     }
@@ -381,18 +431,18 @@ fun TimerScreen(viewModel: StudyViewModel) {
                         }
 
                         Button(
-                            onClick = { viewModel.abandonCustomTimerFirar() },
+                            onClick = { viewModel.finishCustomTimerEarly() },
                             modifier = Modifier
                                 .weight(1f)
                                 .height(50.dp)
-                                .testTag("timer_firar_btn"),
+                                .testTag("timer_end_btn"),
                             shape = RoundedCornerShape(50),
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                         ) {
                             Icon(Icons.Filled.Stop, contentDescription = null)
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                TranslationHelper.getTranslation("btn_end_firar", lang),
+                                TranslationHelper.getTranslation("btn_end", lang),
                                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                             )
                         }

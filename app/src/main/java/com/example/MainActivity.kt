@@ -36,9 +36,13 @@ class MainActivity : ComponentActivity() {
             openAgendaOnLaunch = true
             openAgendaTrigger++
         }
-        if (intent?.getBooleanExtra(NotificationHelper.EXTRA_OPEN_STOPWATCH, false) == true) {
+        val shouldOpenStopwatchSave = intent?.getBooleanExtra(NotificationHelper.EXTRA_OPEN_STOPWATCH_SAVE_DIALOG, false) == true
+        if (intent?.getBooleanExtra(NotificationHelper.EXTRA_OPEN_STOPWATCH, false) == true || shouldOpenStopwatchSave) {
             openStopwatchOnLaunch = true
             openStopwatchTrigger++
+            if (shouldOpenStopwatchSave) {
+                studyViewModel.requestOpenStopwatchSaveDialog()
+            }
         }
         setContent {
             val themeMode by studyViewModel.themeMode.collectAsStateWithLifecycle()
@@ -68,9 +72,13 @@ class MainActivity : ComponentActivity() {
             openAgendaOnLaunch = true
             openAgendaTrigger++
         }
-        if (intent.getBooleanExtra(NotificationHelper.EXTRA_OPEN_STOPWATCH, false)) {
+        val shouldOpenStopwatchSave = intent.getBooleanExtra(NotificationHelper.EXTRA_OPEN_STOPWATCH_SAVE_DIALOG, false)
+        if (intent.getBooleanExtra(NotificationHelper.EXTRA_OPEN_STOPWATCH, false) || shouldOpenStopwatchSave) {
             openStopwatchOnLaunch = true
             openStopwatchTrigger++
+            if (shouldOpenStopwatchSave) {
+                studyViewModel.requestOpenStopwatchSaveDialog()
+            }
         }
     }
 

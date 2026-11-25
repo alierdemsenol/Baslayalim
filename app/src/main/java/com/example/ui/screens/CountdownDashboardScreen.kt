@@ -167,7 +167,7 @@ fun CountdownDashboardScreen(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "${if (examTarget == "LGS") "LGS" else "YKS - TYT"} Sınavına $daysLeft Gün Kaldı",
+                            text = "${if (examTarget == "LGS") "LGS" else "TYT"} Sınavına $daysLeft Gün Kaldı",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary

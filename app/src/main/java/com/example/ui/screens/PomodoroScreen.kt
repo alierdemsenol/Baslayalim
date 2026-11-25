@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,12 +21,15 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -33,6 +37,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -57,8 +62,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.components.EmergencyPromptDialog
-import com.example.ui.viewmodel.EmergencyPromptTarget
+import com.example.ui.viewmodel.FocusModeTarget
 import com.example.ui.viewmodel.PomodoroState
 import com.example.ui.viewmodel.StudyViewModel
 import com.example.util.TranslationHelper
@@ -76,7 +80,6 @@ fun PomodoroScreen(viewModel: StudyViewModel) {
     val pomodoroState by viewModel.pomodoroState.collectAsState()
     val totalSecs by viewModel.pomoTotalSeconds.collectAsState()
 
-    val emergencyPromptTarget by viewModel.emergencyPromptTarget.collectAsState()
     val userTrack by viewModel.userTrack.collectAsState()
     val examTarget by viewModel.examTarget.collectAsState()
     val ydtLanguage by viewModel.ydtLanguage.collectAsState()
@@ -84,12 +87,22 @@ fun PomodoroScreen(viewModel: StudyViewModel) {
         viewModel.getPomodoroSubjects(userTrack, examTarget, pomoExamStage, ydtLanguage)
     }
     val longBreakMinutes by viewModel.longBreakMinutes.collectAsState()
+    val focusLockedTarget by viewModel.focusLockedTarget.collectAsState()
 
     val toastEvent by viewModel.toastEvent.collectAsState()
     val context = LocalContext.current
 
     var showPaydosNoteDialog by remember { mutableStateOf(false) }
     var paydosNoteText by remember { mutableStateOf("") }
+
+    val isKarisik = examTarget == "YKS" && pomoExamStage == "KARISIK"
+    val canFocusLock = pomodoroState in listOf(
+        PomodoroState.WORKING,
+        PomodoroState.WORK_PAUSED,
+        PomodoroState.BREAKING,
+        PomodoroState.BREAK_PAUSED
+    )
+    val isFocusLocked = focusLockedTarget == FocusModeTarget.POMODORO
 
     LaunchedEffect(toastEvent) {
         toastEvent?.let { msg ->
@@ -120,6 +133,48 @@ fun PomodoroScreen(viewModel: StudyViewModel) {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.fillMaxWidth()
             ) {
+                if (canFocusLock) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .padding(bottom = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isFocusLocked) {
+                            Text(
+                                text = TranslationHelper.getTranslation("focus_lock_armed", lang),
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 8.dp)
+                                    .testTag("pomo_focus_lock_armed")
+                            )
+                        } else {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+
+                        IconButton(
+                            onClick = { viewModel.toggleFocusLock(FocusModeTarget.POMODORO) },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (isFocusLocked) MaterialTheme.colorScheme.primaryContainer
+                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                                )
+                                .testTag("pomo_focus_lock_btn")
+                        ) {
+                            Icon(
+                                imageVector = if (isFocusLocked) Icons.Filled.Lock else Icons.Outlined.LockOpen,
+                                contentDescription = TranslationHelper.getTranslation("focus_lock_enable", lang),
+                                tint = if (isFocusLocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
                 if (pomodoroState == PomodoroState.IDLE) {
                     if (examTarget == "YKS") {
                         ExamStageSelectorRow(
@@ -133,37 +188,53 @@ fun PomodoroScreen(viewModel: StudyViewModel) {
                         Spacer(modifier = Modifier.height(10.dp))
                     }
 
-                    Text(
-                        text = TranslationHelper.getTranslation("pomo_subject_label", lang),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    if (isKarisik) {
+                        Text(
+                            text = TranslationHelper.getTranslation("focus_karisik_mode_info", lang),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .testTag("pomo_karisik_info")
+                        )
+                    } else {
+                        Text(
+                            text = TranslationHelper.getTranslation("pomo_subject_label", lang),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag("pomo_subject_label")
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
 
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        items(availableSubjects, key = { it }) { subject ->
-                            val isSelected = selectedSubject == subject
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(
-                                        if (isSelected) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.surfaceVariant
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("pomo_subject_list")
+                        ) {
+                            items(availableSubjects, key = { it }) { subject ->
+                                val isSelected = selectedSubject == subject
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(
+                                            if (isSelected) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.surfaceVariant
+                                        )
+                                        .clickable { viewModel.selectSubject(subject) }
+                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        text = TranslationHelper.localizeSubject(subject, lang),
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp
+                                        ),
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                                    .clickable { viewModel.selectSubject(subject) }
-                                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                            ) {
-                                Text(
-                                    text = TranslationHelper.localizeSubject(subject, lang),
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp
-                                    ),
-                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                }
                             }
                         }
                     }
@@ -264,17 +335,18 @@ fun PomodoroScreen(viewModel: StudyViewModel) {
 
                     PomodoroState.WORKING -> {
                         Button(
-                            onClick = { viewModel.requestEmergencyPrompt(EmergencyPromptTarget.POMODORO_PAUSE) },
+                            onClick = { viewModel.pausePomodoroWork() },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(50.dp),
+                                .height(50.dp)
+                                .testTag("pomo_pause_btn"),
                             shape = RoundedCornerShape(50),
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                         ) {
                             Icon(Icons.Filled.Pause, contentDescription = null)
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                TranslationHelper.getTranslation("btn_emergency_pause", lang),
+                                TranslationHelper.getTranslation("btn_pause", lang),
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                             )
                         }
@@ -286,7 +358,8 @@ fun PomodoroScreen(viewModel: StudyViewModel) {
                                 onClick = { viewModel.resumePomodoroWork() },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(50.dp),
+                                    .height(50.dp)
+                                    .testTag("pomo_resume_btn"),
                                 shape = RoundedCornerShape(50),
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                             ) {
@@ -299,17 +372,18 @@ fun PomodoroScreen(viewModel: StudyViewModel) {
                             }
 
                             Button(
-                                onClick = { viewModel.abandonPomodoroFirar() },
+                                onClick = { viewModel.finishPomodoroEarly() },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(50.dp),
+                                    .height(50.dp)
+                                    .testTag("pomo_end_btn"),
                                 shape = RoundedCornerShape(50),
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                             ) {
                                 Icon(Icons.Filled.Stop, contentDescription = null)
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    TranslationHelper.getTranslation("btn_end_firar", lang),
+                                    TranslationHelper.getTranslation("btn_end", lang),
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                                 )
                             }
@@ -418,7 +492,7 @@ fun PomodoroScreen(viewModel: StudyViewModel) {
                     PomodoroState.BREAKING -> {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             OutlinedButton(
-                                onClick = { viewModel.requestEmergencyPrompt(EmergencyPromptTarget.POMODORO_PAUSE) },
+                                onClick = { viewModel.pausePomodoroBreak() },
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(52.dp),
@@ -485,16 +559,6 @@ fun PomodoroScreen(viewModel: StudyViewModel) {
                 }
             }
         }
-    }
-
-    if (emergencyPromptTarget != EmergencyPromptTarget.NONE) {
-        EmergencyPromptDialog(
-            lang = lang,
-            onConfirmEmergency = { viewModel.respondEmergencyPrompt(isEmergency = true) },
-            onConfirmNormal = { viewModel.respondEmergencyPrompt(isEmergency = false) },
-            onAbandonFirar = { viewModel.respondEmergencyFirar() },
-            onDismiss = { viewModel.respondEmergencyPrompt(isEmergency = false) }
-        )
     }
 
     if (showPaydosNoteDialog) {
@@ -706,7 +770,11 @@ private fun PomodoroCountdownRing(
                 PomodoroState.LONG_BREAK_PROMPT -> "pomo_state_long_break"
                 PomodoroState.SESSION_FINISHED_DAILY_STATS -> "pomo_state_finished"
             }
-            val stageSuffix = if (examStage.isNotBlank()) " • $examStage" else ""
+            val stageSuffix = when {
+                examStage.equals("KARISIK", ignoreCase = true) -> " • ${TranslationHelper.getTranslation("stage_karisik", lang)}"
+                examStage.isNotBlank() -> " • $examStage"
+                else -> ""
+            }
             Text(
                 text = TranslationHelper.getTranslation(stateKey, lang) + stageSuffix,
                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp),
