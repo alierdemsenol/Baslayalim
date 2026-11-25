@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="widget_bg">#FFFEF7FF</color>
+    <color name="widget_bg_border">#FFE7E0EC</color>
+    <color name="widget_pill_bg">#FFFFE3EC</color>
+    <color name="widget_row_bg">#FFF3EDF7</color>
+    <color name="widget_primary">#FFFF2D75</color>
+    <color name="widget_on_surface">#FF1D1B20</color>
+    <color name="widget_on_surface_variant">#FF49454F</color>
+</resources>

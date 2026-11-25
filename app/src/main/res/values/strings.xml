@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">Başlayalım</string>
+    <string name="widget_exam_countdown_name">Exam Countdown Ticker</string>
+    <string name="widget_exam_countdown_desc">Shows remaining days for your target exam with quick switcher arrows.</string>
+    <string name="widget_all_exams_name">All Exams Overview</string>
+    <string name="widget_all_exams_desc">Shows remaining days for all your target exams and custom countdowns.</string>
+    <string name="widget_study_stats_name">Study Stats</string>
+    <string name="widget_study_stats_desc">Shows your daily average, today\'s study time, and total tests solved.</string>
+    <string name="widget_stopwatch_name">Stopwatch</string>
+    <string name="widget_stopwatch_desc">Synchronized study stopwatch you can start, pause, and save directly from the home screen.</string>
+</resources>

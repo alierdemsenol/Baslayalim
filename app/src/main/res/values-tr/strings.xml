@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">Başlayalım</string>
+    <string name="widget_exam_countdown_name">Sınav Sayacı</string>
+    <string name="widget_exam_countdown_desc">Hedef sınavına kalan günü gösterir, oklarla sınavlar arası geçiş sağlar.</string>
+    <string name="widget_all_exams_name">Tüm Sınavlar Özeti</string>
+    <string name="widget_all_exams_desc">Hedeflediğin tüm sınavlara ve özel sayaçlara kalan günleri gösterir.</string>
+    <string name="widget_study_stats_name">Çalışma İstatistiklerim</string>
+    <string name="widget_study_stats_desc">Günlük ortalama çalışma süreni, bugünkü çalışmanı ve toplam test sayını gösterir.</string>
+    <string name="widget_stopwatch_name">Kronometre</string>
+    <string name="widget_stopwatch_desc">Uygulamayla eşzamanlı çalışan, doğrudan ana ekrandan başlatıp duraklatabildiğin ve kaydedebildiğin kronometre.</string>
+</resources>
